@@ -1,0 +1,8 @@
+{
+  "network": "localhost",
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "ATT": "0x5f3f1dBD7B74C6B46e8c44f98792A1dAf8d69154",
+  "SourceBridge": "0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575",
+  "wATT": "0xCD8a1C3ba11CF5ECfa6267617243239504a98d90",
+  "TargetBridge": "0x82e01223d51Eb87e16A03E24687EDF0F294da6f1"
+}

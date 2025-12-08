@@ -1,0 +1,12 @@
+{
+  "sepolia": {
+    "deployer": "0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a",
+    "ATT": "0x270387a7D6dF9E4d3315406aA4F639d3Cc414610",
+    "SourceBridge": "0x8e0e8C997aBFc1eEbc7bEfC8E2Fb444c3B70020a"
+  },
+  "amoy": {
+    "deployer": "0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a",
+    "wATT": "0x270387a7D6dF9E4d3315406aA4F639d3Cc414610",
+    "TargetBridge": "0x8e0e8C997aBFc1eEbc7bEfC8E2Fb444c3B70020a"
+  }
+}

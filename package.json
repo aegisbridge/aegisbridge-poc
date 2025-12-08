@@ -1,7 +1,7 @@
 {
   "name": "aegisbridge",
   "version": "1.0.0",
-  "description": "",
+  "description": "This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -16,6 +16,23 @@
     "hardhat": "^2.26.0"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.4.0"
-  }
+    "@openzeppelin/contracts": "^5.4.0",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "https-proxy-agent": "^7.0.6",
+    "node-fetch": "^2.7.0",
+    "tweetnacl": "^1.0.3"
+  },
+  "directories": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aegisbridge/aegisbridge-poc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aegisbridge/aegisbridge-poc/issues"
+  },
+  "homepage": "https://github.com/aegisbridge/aegisbridge-poc#readme"
 }
