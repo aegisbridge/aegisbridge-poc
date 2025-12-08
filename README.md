@@ -71,20 +71,6 @@ deployments/
 
 ---
 
-## 🔭 AegisBridge Roadmap
-
-- [x] v0.1 – Basic lock → event → mint (Sepolia → Amoy)
-- [ ] v0.2 – Burn → event → unlock (Amoy → Sepolia, arah sebaliknya)
-- [ ] v0.3 – Simple relayer CLI (auto baca event + kirim tx ke chain target)
-- [ ] v0.4 – Minimal web dashboard:
-  - Connect wallet
-  - Form bridge (source chain, target chain, amount)
-  - Status history (tx hash source/target)
-- [ ] v0.5 – PQC R&D:
-  - Dokumentasi konsep penggunaan skema tanda tangan post-quantum di lapisan relayer
-  - Draft whitepaper singkat
-
-
 ## Prerequisites
 
 - Node.js (>= 18 recommended)
@@ -422,6 +408,19 @@ This repository is an early exploration of AegisBridge. Next logical steps:
      - Show bridge status and resulting wATT balance on Amoy
 
 ---
+
+## 🔭 AegisBridge Roadmap
+
+- [x] v0.1 – Basic lock → event → mint (Sepolia → Amoy)
+- [ ] v0.2 – Burn → event → unlock (Amoy → Sepolia, arah sebaliknya)
+- [ ] v0.3 – Simple relayer CLI (auto baca event + kirim tx ke chain target)
+- [ ] v0.4 – Minimal web dashboard:
+  - Connect wallet
+  - Form bridge (source chain, target chain, amount)
+  - Status history (tx hash source/target)
+- [ ] v0.5 – PQC R&D:
+  - Conceptual documentation of the use of post-quantum signature schemes in the relayer layer
+  - Short whitepaper draft
 
 ## License
 
