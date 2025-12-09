@@ -1,19 +1,29 @@
 // scripts/testnet_relayer.js
+// AegisBridge v0.3.1 Testnet Relayer
 //
-// AegisBridge v0.2 Testnet Relayer
-// - Listens to Locked on Sepolia → calls mintFromSource on Amoy
-// - Listens to BurnToSource on Amoy → calls unlockFromTarget on Sepolia
-// - Reconstructs AegisMessage.Message off-chain and logs its hash
+// - Listens to:
+//   - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia)
+//   - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy)
+// - Calls:
+//   - mintFromSource(recipient, amount, nonce) on TargetBridge
+//   - unlockFromTarget(recipient, amount, burnNonce) on SourceBridge
 //
-// Run with:
-//   node scripts/testnet_relayer.js
+// v0.3.1 features:
+//   - DRY_RUN mode (no tx sent, just log what *would* happen)
+//   - Retry logic for tx sending
+//   - Chunked catch-up (eth_getLogs max 10-block window for Alchemy free tier)
+//   - Optional disable sync via RELAYER_DISABLE_SYNC
+//   - Persistent state in relayer_state.json (processed nonces)
+//   - More robust reading of deployment JSON (ATT / wATT keys)
 
 require("dotenv").config();
-const { ethers } = require("ethers");
-const path = require("path");
 const fs = require("fs");
+const path = require("path");
+const { ethers } = require("ethers");
 
-// ---------- Config & helpers ----------
+// ------------------------
+// Config
+// ------------------------
 
 const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL;
 const AMOY_RPC_URL = process.env.AMOY_RPC_URL;
@@ -21,288 +31,523 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY;
 
 if (!SEPOLIA_RPC_URL || !AMOY_RPC_URL || !PRIVATE_KEY) {
   console.error(
-    "[config] Missing SEPOLIA_RPC_URL / AMOY_RPC_URL / PRIVATE_KEY in .env"
+    "[FATAL] Missing SEPOLIA_RPC_URL / AMOY_RPC_URL / PRIVATE_KEY in .env"
   );
   process.exit(1);
 }
 
-// Load deployments JSON
-const deploymentsPath = path.join(
-  __dirname,
-  "..",
+// Relayer behavior config
+const DRY_RUN =
+  (process.env.RELAYER_DRY_RUN || "false").toLowerCase() === "true";
+const MAX_RETRIES = Number(process.env.RELAYER_MAX_RETRIES || "3");
+const RETRY_DELAY_MS = Number(process.env.RELAYER_RETRY_DELAY_MS || "10000");
+const DISABLE_SYNC =
+  (process.env.RELAYER_DISABLE_SYNC || "false").toLowerCase() === "true";
+
+const FROM_BLOCK_SEPOLIA = process.env.RELAYER_FROM_BLOCK_SEPOLIA
+  ? Number(process.env.RELAYER_FROM_BLOCK_SEPOLIA)
+  : null;
+const FROM_BLOCK_AMOY = process.env.RELAYER_FROM_BLOCK_AMOY
+  ? Number(process.env.RELAYER_FROM_BLOCK_AMOY)
+  : null;
+
+// eth_getLogs window limit (Alchemy free tier: max 10 blocks)
+const LOG_CHUNK_SIZE = 10;
+
+// Files
+const ROOT_DIR = path.join(__dirname, "..");
+const DEPLOYMENTS_FILE = path.join(
+  ROOT_DIR,
   "deployments",
   "testnet_sepolia_amoy.json"
 );
+const STATE_FILE = path.join(ROOT_DIR, "relayer_state.json");
+const LOG_FILE = path.join(ROOT_DIR, "relayer.log");
 
-if (!fs.existsSync(deploymentsPath)) {
-  console.error(
-    `[deployments] File not found: ${deploymentsPath}. Deploy v0.2 contracts first.`
-  );
-  process.exit(1);
+// ------------------------
+// Utils: logging & state
+// ------------------------
+
+function log(...args) {
+  const line = `[${new Date().toISOString()}] ${args.join(" ")}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(LOG_FILE, line + "\n", { encoding: "utf8" });
+  } catch (e) {
+    // Do not crash on log file error
+  }
 }
 
-const deployments = require(deploymentsPath);
+function loadJsonSafe(file, defaultValue) {
+  try {
+    if (!fs.existsSync(file)) return defaultValue;
+    const raw = fs.readFileSync(file, "utf8");
+    return JSON.parse(raw);
+  } catch (e) {
+    log(`[WARN] Failed to read/parse ${file}: ${e.message}`);
+    return defaultValue;
+  }
+}
 
+function saveJsonSafe(file, value) {
+  try {
+    fs.writeFileSync(file, JSON.stringify(value, null, 2), "utf8");
+  } catch (e) {
+    log(`[WARN] Failed to write ${file}: ${e.message}`);
+  }
+}
+
+// Load deployments
+const deployments = loadJsonSafe(DEPLOYMENTS_FILE, {});
 if (!deployments.sepolia || !deployments.amoy) {
   console.error(
-    "[deployments] Missing sepolia/amoy sections in testnet_sepolia_amoy.json"
+    `[FATAL] Missing sepolia/amoy sections in ${DEPLOYMENTS_FILE}. Deploy v0.2, then try again.`
   );
   process.exit(1);
 }
 
-const SEPOLIA_SOURCE_BRIDGE = deployments.sepolia.SourceBridge;
-const SEPOLIA_ATT = deployments.sepolia.ATT;
-const AMOY_TARGET_BRIDGE = deployments.amoy.TargetBridge;
-const AMOY_WATT = deployments.amoy.wATT;
+const sepoliaSection = deployments.sepolia;
+const amoySection = deployments.amoy;
+
+// Try multiple key names for ATT & wATT (robust to small JSON changes)
+const attAddress =
+  sepoliaSection.ATT ||
+  sepoliaSection.TestToken ||
+  sepoliaSection.token ||
+  sepoliaSection.Token;
+
+const wattAddress =
+  amoySection.WrappedTestToken ||
+  amoySection.wATT ||
+  amoySection.Token ||
+  amoySection.token;
+
+if (!attAddress) {
+  console.error(
+    "[FATAL] Could not find ATT address in deployments.sepolia (tried ATT / TestToken / token / Token)"
+  );
+  process.exit(1);
+}
+if (!wattAddress) {
+  console.error(
+    "[WARN] Could not find WrappedTestToken address in deployments.amoy (tried WrappedTestToken / wATT / Token / token). Logging will show undefined, but relayer can still work using TargetBridge only."
+  );
+}
+
+// Load relayer state (processed nonces)
+let relayerState = loadJsonSafe(STATE_FILE, {
+  processedLockNonces: {}, // lock nonce on source (for mintFromSource)
+  processedBurnNonces: {}, // burn nonce on target (for unlockFromTarget)
+});
+
+// Persist state helpers
+function markLockNonceProcessed(nonce) {
+  relayerState.processedLockNonces[nonce.toString()] = true;
+  saveJsonSafe(STATE_FILE, relayerState);
+}
+
+function markBurnNonceProcessed(burnNonce) {
+  relayerState.processedBurnNonces[burnNonce.toString()] = true;
+  saveJsonSafe(STATE_FILE, relayerState);
+}
+
+// ------------------------
+// Providers & Contracts
+// ------------------------
+
+const sepoliaProvider = new ethers.JsonRpcProvider(SEPOLIA_RPC_URL);
+const amoyProvider = new ethers.JsonRpcProvider(AMOY_RPC_URL);
+
+const sepoliaWallet = new ethers.Wallet(PRIVATE_KEY, sepoliaProvider);
+const amoyWallet = new ethers.Wallet(PRIVATE_KEY, amoyProvider);
 
 // Load ABIs from Hardhat artifacts
-const sourceBridgeArtifact = require("../artifacts/contracts/SourceBridge.sol/SourceBridge.json");
-const targetBridgeArtifact = require("../artifacts/contracts/TargetBridge.sol/TargetBridge.json");
+const sourceBridgeAbi = require(path.join(
+  ROOT_DIR,
+  "artifacts",
+  "contracts",
+  "SourceBridge.sol",
+  "SourceBridge.json"
+)).abi;
+const targetBridgeAbi = require(path.join(
+  ROOT_DIR,
+  "artifacts",
+  "contracts",
+  "TargetBridge.sol",
+  "TargetBridge.json"
+)).abi;
 
-// AegisMessage typehash (must match contracts/AegisMessage.sol)
-const MESSAGE_TYPEHASH = ethers.keccak256(
-  ethers.toUtf8Bytes(
-    "AegisBridge.Message(uint64 srcChainId,uint64 dstChainId,address srcBridge,address dstBridge,address token,address user,uint256 amount,uint256 nonce,uint8 direction,uint64 timestamp)"
-  )
+const sourceBridgeAddress = sepoliaSection.SourceBridge;
+const targetBridgeAddress = amoySection.TargetBridge;
+
+if (!sourceBridgeAddress || !targetBridgeAddress) {
+  console.error(
+    "[FATAL] Missing SourceBridge / TargetBridge addresses in deployments JSON"
+  );
+  process.exit(1);
+}
+
+const sourceBridge = new ethers.Contract(
+  sourceBridgeAddress,
+  sourceBridgeAbi,
+  sepoliaWallet
+);
+const targetBridge = new ethers.Contract(
+  targetBridgeAddress,
+  targetBridgeAbi,
+  amoyWallet
 );
 
-// Direction enum mapping (must match AegisMessage.Direction)
-const Direction = {
-  LockToMint: 0,
-  BurnToUnlock: 1,
-};
+// ------------------------
+// Helpers
+// ------------------------
 
-function computeMessageHash(msg) {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const encoded = abiCoder.encode(
-    [
-      "bytes32",
-      "uint64",
-      "uint64",
-      "address",
-      "address",
-      "address",
-      "address",
-      "uint256",
-      "uint256",
-      "uint8",
-      "uint64",
-    ],
-    [
-      MESSAGE_TYPEHASH,
-      msg.srcChainId,
-      msg.dstChainId,
-      msg.srcBridge,
-      msg.dstBridge,
-      msg.token,
-      msg.user,
-      msg.amount,
-      msg.nonce,
-      msg.direction,
-      msg.timestamp,
-    ]
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry sending tx
+async function sendWithRetry(fn, label) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (DRY_RUN) {
+        log(`[DRY_RUN] Would send tx: ${label}`);
+        return null;
+      }
+      log(`[TX] ${label} — attempt ${attempt}/${MAX_RETRIES}`);
+      const tx = await fn();
+      log(`[TX] ${label} sent: ${tx.hash}`);
+      const receipt = await tx.wait();
+      log(
+        `[TX] ${label} confirmed in block ${receipt.blockNumber} (status=${receipt.status})`
+      );
+      return receipt;
+    } catch (err) {
+      lastError = err;
+      const short = err.shortMessage || err.message || String(err);
+
+      // Non-retryable errors
+      if (
+        short.includes("already processed") ||
+        short.includes("nonce already processed") ||
+        short.includes("paused") ||
+        short.includes("Pausable: paused")
+      ) {
+        log(
+          `[TX-ERROR] ${label} non-retryable error: ${short} — not retrying.`
+        );
+        break;
+      }
+
+      log(
+        `[TX-ERROR] ${label} failed on attempt ${attempt}/${MAX_RETRIES}: ${short}`
+      );
+      if (attempt < MAX_RETRIES) {
+        log(
+          `[TX] Waiting ${RETRY_DELAY_MS} ms before retry (label=${label})...`
+        );
+        await sleep(RETRY_DELAY_MS);
+      }
+    }
+  }
+  log(`[TX-ERROR] ${label} giving up after ${MAX_RETRIES} attempts.`);
+  if (lastError) {
+    log(`[TX-ERROR-DETAIL]`, lastError);
+  }
+  return null;
+}
+
+// Chunked queryFilter to respect Alchemy free tier 10-block limit
+async function queryEventsChunked(contract, filter, fromBlock, toBlock, label) {
+  const events = [];
+  const chunkSize = LOG_CHUNK_SIZE;
+
+  for (let start = fromBlock; start <= toBlock; start += chunkSize) {
+    const end = Math.min(start + chunkSize - 1, toBlock);
+    log(
+      `[SYNC] [${label}] Querying events from block ${start} to ${end} (chunkSize=${chunkSize})...`
+    );
+    try {
+      const chunk = await contract.queryFilter(filter, start, end);
+      log(
+        `[SYNC] [${label}] Got ${chunk.length} event(s) in chunk ${start}-${end}.`
+      );
+      events.push(...chunk);
+    } catch (e) {
+      const short = e.shortMessage || e.message || String(e);
+      log(
+        `[SYNC-ERROR] [${label}] Failed to query logs ${start}-${end}: ${short}`
+      );
+      // Jika provider limit terlalu ketat, kita lanjut saja — event masih bisa ditangkap live subscription.
+    }
+    // kecilkan speed agar tidak spam RPC
+    await sleep(300);
+  }
+
+  return events;
+}
+
+// ------------------------
+// Handlers
+// ------------------------
+
+async function handleLockedEvent(sender, recipient, amount, nonce, event) {
+  const nonceStr = nonce.toString();
+  const a = ethers.formatUnits(amount, 18);
+
+  log(
+    `\n[LOCK EVENT] Sepolia Locked → nonce=${nonceStr}, amount=${a}, sender=${sender}, recipient=${recipient}, tx=${event.log.transactionHash}`
   );
-  return ethers.keccak256(encoded);
+
+  // Check local state
+  if (relayerState.processedLockNonces[nonceStr]) {
+    log(
+      `[LOCK] nonce=${nonceStr} already marked as processed in relayer_state.json, skipping mint.`
+    );
+    return;
+  }
+
+  // On-chain check: processedNonces on TargetBridge (if exposed)
+  let alreadyProcessed = false;
+  try {
+    if (typeof targetBridge.processedNonces === "function") {
+      alreadyProcessed = await targetBridge.processedNonces(nonce);
+    }
+  } catch (e) {
+    log(
+      `[WARN] Failed to read processedNonces(${nonceStr}) on TargetBridge: ${e.message}`
+    );
+  }
+
+  if (alreadyProcessed) {
+    log(
+      `[LOCK] nonce=${nonceStr} already processed on TargetBridge (on-chain), marking as processed locally and skipping.`
+    );
+    markLockNonceProcessed(nonce);
+    return;
+  }
+
+  // Call mintFromSource on Amoy
+  log(
+    `[MINT] Preparing mintFromSource on Amoy: user=${recipient}, amount=${a}, nonce=${nonceStr}`
+  );
+
+  const receipt = await sendWithRetry(
+    () => targetBridge.mintFromSource(recipient, amount, nonce),
+    `mintFromSource(nonce=${nonceStr})`
+  );
+
+  if (receipt && receipt.status === 1) {
+    log(
+      `[MINT] mintFromSource successful for nonce=${nonceStr}, tx=${receipt.transactionHash}`
+    );
+    markLockNonceProcessed(nonce);
+  } else if (DRY_RUN) {
+    log(
+      `[MINT][DRY_RUN] Skipped sending tx, but mintFromSource would have been called for nonce=${nonceStr}.`
+    );
+  }
 }
 
-function short(addr) {
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+async function handleBurnToSourceEvent(from, to, amount, burnNonce, event) {
+  const nonceStr = burnNonce.toString();
+  const a = ethers.formatUnits(amount, 18);
+
+  log(
+    `\n[BURN EVENT] Amoy BurnToSource → burnNonce=${nonceStr}, amount=${a}, from=${from}, to=${to}, tx=${event.log.transactionHash}`
+  );
+
+  // Check local state
+  if (relayerState.processedBurnNonces[nonceStr]) {
+    log(
+      `[BURN] burnNonce=${nonceStr} already marked as processed in relayer_state.json, skipping unlock.`
+    );
+    return;
+  }
+
+  // On-chain check: processedBurnNonces on SourceBridge
+  let alreadyProcessed = false;
+  try {
+    if (typeof sourceBridge.processedBurnNonces === "function") {
+      alreadyProcessed = await sourceBridge.processedBurnNonces(burnNonce);
+    }
+  } catch (e) {
+    log(
+      `[WARN] Failed to read processedBurnNonces(${nonceStr}) on SourceBridge: ${e.message}`
+    );
+  }
+
+  if (alreadyProcessed) {
+    log(
+      `[BURN] burnNonce=${nonceStr} already processed on SourceBridge (on-chain), marking as processed locally and skipping.`
+    );
+    markBurnNonceProcessed(burnNonce);
+    return;
+  }
+
+  // Call unlockFromTarget on Sepolia
+  log(
+    `[UNLOCK] Preparing unlockFromTarget on Sepolia: recipient=${to}, amount=${a}, burnNonce=${nonceStr}`
+  );
+
+  const receipt = await sendWithRetry(
+    () => sourceBridge.unlockFromTarget(to, amount, burnNonce),
+    `unlockFromTarget(burnNonce=${nonceStr})`
+  );
+
+  if (receipt && receipt.status === 1) {
+    log(
+      `[UNLOCK] unlockFromTarget successful for burnNonce=${nonceStr}, tx=${receipt.transactionHash}`
+    );
+    markBurnNonceProcessed(burnNonce);
+  } else if (DRY_RUN) {
+    log(
+      `[UNLOCK][DRY_RUN] Skipped sending tx, but unlockFromTarget would have been called for burnNonce=${nonceStr}.`
+    );
+  }
 }
 
-// ---------- Main relayer ----------
+// ------------------------
+// Catch-up past events
+// ------------------------
+
+async function syncPastLockedEvents() {
+  const latest = await sepoliaProvider.getBlockNumber();
+  const from =
+    FROM_BLOCK_SEPOLIA && FROM_BLOCK_SEPOLIA > 0
+      ? FROM_BLOCK_SEPOLIA
+      : Math.max(0, latest - 2000); // last ~2000 blocks by default
+
+  log(
+    `[SYNC] Fetching past Locked events on Sepolia from block ${from} to ${latest} (chunked by ${LOG_CHUNK_SIZE})...`
+  );
+  const filter = sourceBridge.filters.Locked();
+  const events = await queryEventsChunked(
+    sourceBridge,
+    filter,
+    from,
+    latest,
+    "Locked/Sepolia"
+  );
+  log(`[SYNC] Total Locked events found across all chunks: ${events.length}`);
+  for (const ev of events) {
+    const { sender, recipient, amount, nonce } = ev.args;
+    await handleLockedEvent(sender, recipient, amount, nonce, ev);
+  }
+}
+
+async function syncPastBurnEvents() {
+  const latest = await amoyProvider.getBlockNumber();
+  const from =
+    FROM_BLOCK_AMOY && FROM_BLOCK_AMOY > 0
+      ? FROM_BLOCK_AMOY
+      : Math.max(0, latest - 2000);
+
+  log(
+    `[SYNC] Fetching past BurnToSource events on Amoy from block ${from} to ${latest} (chunked by ${LOG_CHUNK_SIZE})...`
+  );
+  const filter = targetBridge.filters.BurnToSource();
+  const events = await queryEventsChunked(
+    targetBridge,
+    filter,
+    from,
+    latest,
+    "BurnToSource/Amoy"
+  );
+  log(
+    `[SYNC] Total BurnToSource events found across all chunks: ${events.length}`
+  );
+  for (const ev of events) {
+    const { from: src, to, amount, burnNonce } = ev.args;
+    await handleBurnToSourceEvent(src, to, amount, burnNonce, ev);
+  }
+}
+
+// ------------------------
+// Main
+// ------------------------
 
 async function main() {
-  // Providers & signers
-  const sepoliaProvider = new ethers.JsonRpcProvider(SEPOLIA_RPC_URL);
-  const amoyProvider = new ethers.JsonRpcProvider(AMOY_RPC_URL);
+  const [sepoliaNetwork, amoyNetwork] = await Promise.all([
+    sepoliaProvider.getNetwork(),
+    amoyProvider.getNetwork(),
+  ]);
 
-  const wallet = new ethers.Wallet(PRIVATE_KEY);
-  const sepoliaSigner = wallet.connect(sepoliaProvider);
-  const amoySigner = wallet.connect(amoyProvider);
+  const sepoliaChainId = sepoliaNetwork.chainId;
+  const amoyChainId = amoyNetwork.chainId;
 
-  const sepoliaNet = await sepoliaProvider.getNetwork();
-  const amoyNet = await amoyProvider.getNetwork();
-
-  const sepoliaChainId = BigInt(sepoliaNet.chainId);
-  const amoyChainId = BigInt(amoyNet.chainId);
-
-  const deployer = await sepoliaSigner.getAddress();
-
-  const sourceBridge = new ethers.Contract(
-    SEPOLIA_SOURCE_BRIDGE,
-    sourceBridgeArtifact.abi,
-    sepoliaSigner
+  log("=== AegisBridge v0.3.1 Testnet Relayer ===");
+  log(`Sepolia RPC : ${SEPOLIA_RPC_URL}`);
+  log(`Amoy RPC    : ${AMOY_RPC_URL}`);
+  log(`Deployer/Relayer address: ${sepoliaWallet.address}`);
+  log("");
+  log(`Sepolia chainId : ${sepoliaChainId}`);
+  log(`Amoy    chainId : ${amoyChainId}`);
+  log("");
+  log(`SourceBridge (Sepolia): ${sourceBridgeAddress}`);
+  log(`ATT (Sepolia)        : ${attAddress}`);
+  log(`TargetBridge (Amoy)  : ${targetBridgeAddress}`);
+  log(`wATT (Amoy)          : ${wattAddress}`);
+  log("========================================");
+  log(
+    `[CONFIG] DRY_RUN=${DRY_RUN}, MAX_RETRIES=${MAX_RETRIES}, RETRY_DELAY_MS=${RETRY_DELAY_MS}`
   );
-
-  const targetBridge = new ethers.Contract(
-    AMOY_TARGET_BRIDGE,
-    targetBridgeArtifact.abi,
-    amoySigner
+  log(
+    `[CONFIG] DISABLE_SYNC=${DISABLE_SYNC}, FROM_BLOCK_SEPOLIA=${FROM_BLOCK_SEPOLIA}, FROM_BLOCK_AMOY=${FROM_BLOCK_AMOY}`
   );
+  log(
+    `[STATE] Loaded relayer_state.json with ${Object.keys(
+      relayerState.processedLockNonces || {}
+    ).length} lock nonces and ${Object.keys(
+      relayerState.processedBurnNonces || {}
+    ).length} burn nonces.`
+  );
+  log("");
 
-  console.log("=== AegisBridge v0.2 Testnet Relayer ===");
-  console.log("Sepolia RPC :", SEPOLIA_RPC_URL);
-  console.log("Amoy RPC    :", AMOY_RPC_URL);
-  console.log("Deployer/Relayer address:", deployer);
-  console.log();
-  console.log("Sepolia chainId :", sepoliaNet.chainId.toString());
-  console.log("Amoy    chainId :", amoyNet.chainId.toString());
-  console.log();
-  console.log("SourceBridge (Sepolia):", SEPOLIA_SOURCE_BRIDGE);
-  console.log("ATT (Sepolia)        :", SEPOLIA_ATT);
-  console.log("TargetBridge (Amoy)  :", AMOY_TARGET_BRIDGE);
-  console.log("wATT (Amoy)          :", AMOY_WATT);
-  console.log("========================================");
-  console.log();
-  console.log("Subscribing to events...");
-  console.log(
+  // Catch-up (optional)
+  if (!DISABLE_SYNC) {
+    await syncPastLockedEvents();
+    await syncPastBurnEvents();
+  } else {
+    log("[SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.");
+  }
+
+  // Live subscriptions
+  log("Subscribing to live events...");
+  log(
     "- Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy"
   );
-  console.log(
+  log(
     "- BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia"
   );
-  console.log();
-  console.log("Press Ctrl+C to exit.\n");
-
-  // ----- Handler: Locked on Sepolia → mintFromSource on Amoy -----
+  log("");
+  log("Press Ctrl+C to exit.\n");
 
   sourceBridge.on(
     "Locked",
     async (sender, recipient, amount, nonce, event) => {
       try {
-        console.log("\n[Locked event detected on Sepolia]");
-        console.log(
-          `  sender    : ${short(sender)}  → recipient: ${short(recipient)}`
-        );
-        console.log(`  amount    : ${ethers.formatUnits(amount, 18)}`);
-        console.log(`  nonce     : ${nonce.toString()}`);
-        console.log(`  tx hash   : ${event.log.transactionHash}`);
-
-        // Fetch block timestamp to reconstruct Message
-        const block = await sepoliaProvider.getBlock(event.blockNumber);
-        const timestamp = BigInt(block.timestamp);
-
-        const msg = {
-          srcChainId: sepoliaChainId,
-          dstChainId: amoyChainId, // v0.2: we know destination is Amoy
-          srcBridge: SEPOLIA_SOURCE_BRIDGE,
-          dstBridge: AMOY_TARGET_BRIDGE,
-          token: SEPOLIA_ATT,
-          // Design choice: user = recipient on target chain
-          user: recipient,
-          amount: amount,
-          nonce: BigInt(nonce.toString()),
-          direction: Direction.LockToMint,
-          timestamp,
-        };
-
-        const msgHash = computeMessageHash(msg);
-
-        console.log("  [AegisMessage]");
-        console.log(
-          `    direction : LockToMint (0)\n    srcChainId: ${msg.srcChainId.toString()}\n    dstChainId: ${msg.dstChainId.toString()}\n    user      : ${short(msg.user)}\n    amount    : ${ethers.formatUnits(msg.amount, 18)}\n    nonce     : ${msg.nonce.toString()}\n    timestamp : ${msg.timestamp.toString()}`
-        );
-        console.log(`  message hash (off-chain computed): ${msgHash}`);
-
-        // Optional: check if this nonce is already processed on target
-        const alreadyProcessed = await targetBridge.processedNonces(nonce);
-        if (alreadyProcessed) {
-          console.log(
-            "  [Relayer] TargetBridge.processedNonces already true. Skipping mintFromSource."
-          );
-          return;
-        }
-
-        console.log(
-          "  [Relayer] Calling TargetBridge.mintFromSource(...) on Amoy..."
-        );
-        const tx = await targetBridge.mintFromSource(
-          recipient,
-          amount,
-          nonce,
-          {
-            gasLimit: 300000n,
-          }
-        );
-        console.log(`  → mint tx sent: ${tx.hash}`);
-        const receipt = await tx.wait();
-        console.log(
-          `  → mint tx confirmed in block: ${receipt.blockNumber.toString()}`
-        );
-      } catch (err) {
-        console.error("[Relayer] Error handling Locked event:", err);
+        await handleLockedEvent(sender, recipient, amount, nonce, event);
+      } catch (e) {
+        log(`[ERROR] handleLockedEvent failed: ${e.message || e}`);
       }
     }
   );
-
-  // ----- Handler: BurnToSource on Amoy → unlockFromTarget on Sepolia -----
 
   targetBridge.on(
     "BurnToSource",
     async (from, to, amount, burnNonce, event) => {
       try {
-        console.log("\n[BurnToSource event detected on Amoy]");
-        console.log(
-          `  from      : ${short(from)}  → to (Sepolia): ${short(to)}`
-        );
-        console.log(`  amount    : ${ethers.formatUnits(amount, 18)}`);
-        console.log(`  burnNonce : ${burnNonce.toString()}`);
-        console.log(`  tx hash   : ${event.log.transactionHash}`);
-
-        // Fetch block timestamp to reconstruct Message
-        const block = await amoyProvider.getBlock(event.blockNumber);
-        const timestamp = BigInt(block.timestamp);
-
-        const msg = {
-          srcChainId: amoyChainId,
-          dstChainId: sepoliaChainId,
-          srcBridge: AMOY_TARGET_BRIDGE,
-          dstBridge: SEPOLIA_SOURCE_BRIDGE,
-          token: AMOY_WATT,
-          // Design choice: user = receiver on source chain (to)
-          user: to,
-          amount: amount,
-          nonce: BigInt(burnNonce.toString()),
-          direction: Direction.BurnToUnlock,
-          timestamp,
-        };
-
-        const msgHash = computeMessageHash(msg);
-
-        console.log("  [AegisMessage]");
-        console.log(
-          `    direction : BurnToUnlock (1)\n    srcChainId: ${msg.srcChainId.toString()}\n    dstChainId: ${msg.dstChainId.toString()}\n    user      : ${short(msg.user)}\n    amount    : ${ethers.formatUnits(msg.amount, 18)}\n    nonce     : ${msg.nonce.toString()}\n    timestamp : ${msg.timestamp.toString()}`
-        );
-        console.log(`  message hash (off-chain computed): ${msgHash}`);
-
-        // Check if burnNonce already processed on SourceBridge
-        const processed = await sourceBridge.processedBurnNonces(burnNonce);
-        if (processed) {
-          console.log(
-            "  [Relayer] SourceBridge.processedBurnNonces already true. Skipping unlockFromTarget."
-          );
-          return;
-        }
-
-        console.log(
-          "  [Relayer] Calling SourceBridge.unlockFromTarget(...) on Sepolia..."
-        );
-        const tx = await sourceBridge.unlockFromTarget(to, amount, burnNonce, {
-          gasLimit: 300000n,
-        });
-        console.log(`  → unlock tx sent: ${tx.hash}`);
-        const receipt = await tx.wait();
-        console.log(
-          `  → unlock tx confirmed in block: ${receipt.blockNumber.toString()}`
-        );
-      } catch (err) {
-        console.error("[Relayer] Error handling BurnToSource event:", err);
+        await handleBurnToSourceEvent(from, to, amount, burnNonce, event);
+      } catch (e) {
+        log(`[ERROR] handleBurnToSourceEvent failed: ${e.message || e}`);
       }
     }
   );
 }
 
 main().catch((err) => {
-  console.error("Fatal relayer error:", err);
+  console.error("[FATAL] Relayer crashed:", err);
   process.exit(1);
 });
