@@ -3,23 +3,31 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 import "./AegisMessage.sol";
 
 /// @title SourceBridge
-/// @notice Bridge di sisi chain asal:
+/// @notice Bridge di sisi chain asal (contoh: Sepolia):
 ///         - lock token ketika user mau pindah ke chain tujuan
 ///         - unlock token ketika ada burn di chain tujuan.
-/// @dev v0.2: ditambah emit hash canonical AegisMessage saat lock
-///      (bisa dipakai relayer/PQC layer di masa depan).
-contract SourceBridge is Ownable {
+contract SourceBridge is Ownable, Pausable {
     using AegisMessage for AegisMessage.Message;
 
-    IERC20 public immutable token; // token asli (ATT)
-    uint256 public nonce;          // id unik tiap lock
+    /// @notice Token asli (ATT) di source chain.
+    IERC20 public immutable token;
 
-    // Burn nonce dari chain tujuan yang sudah diproses → cegah replay unlock.
+    /// @notice Nonce unik untuk setiap lock di source.
+    uint256 public nonce;
+
+    /// @notice Burn nonce dari chain tujuan yang sudah diproses → cegah replay unlock.
     mapping(uint256 => bool) public processedBurnNonces;
+
+    /// @notice (Opsional) konfigurasi remote bridge (tujuan).
+    ///         Tidak wajib di-set untuk PoC; default 0 berarti belum dikonfigurasi.
+    uint64 public dstChainId;
+    address public dstBridge;
+    address public dstToken; // token representasi di chain tujuan (mis. wATT)
 
     /// Emitted ketika user mengunci token di source.
     event Locked(
@@ -36,8 +44,8 @@ contract SourceBridge is Ownable {
         uint256 indexed burnNonce
     );
 
-    /// Emitted ketika hash canonical AegisMessage terbentuk.
-    /// Untuk v0.2, event ini dipakai hanya pada arah LockToMint.
+    /// Emitted ketika message hash canonical AegisBridge terbentuk.
+    /// Digunakan untuk future PQC-aware relayers.
     event MessageHashEmitted(
         bytes32 indexed msgHash,
         AegisMessage.Direction direction,
@@ -49,10 +57,35 @@ contract SourceBridge is Ownable {
         token = IERC20(_token);
     }
 
+    // ============ Admin (owner) ============
+
+    /// @notice Set konfigurasi remote (tujuan) untuk message model.
+    /// @dev Opsional, hanya dipakai untuk AegisMessage hash (tidak mempengaruhi logika lock/unlock).
+    function setDestination(
+        uint64 _dstChainId,
+        address _dstBridge,
+        address _dstToken
+    ) external onlyOwner {
+        dstChainId = _dstChainId;
+        dstBridge = _dstBridge;
+        dstToken = _dstToken;
+    }
+
+    /// @notice Pause seluruh operasi state-changing (lock + unlockFromTarget).
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpause seluruh operasi state-changing.
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    // ============ Core bridge logic ============
+
     /// @notice User mengunci token di sisi asal.
-    /// @dev Event `Locked` ini yang akan dibaca relayer. Di v0.2 kita juga
-    ///      emit hash canonical message via `MessageHashEmitted`.
-    function lock(uint256 amount, address recipient) external {
+    /// @dev Event `Locked` ini yang akan dibaca relayer.
+    function lock(uint256 amount, address recipient) external whenNotPaused {
         require(amount > 0, "Amount must be > 0");
         require(recipient != address(0), "Recipient cannot be zero");
 
@@ -61,27 +94,16 @@ contract SourceBridge is Ownable {
 
         nonce += 1;
 
-        // Event lama (tetap dipakai relayer v0.2)
         emit Locked(msg.sender, recipient, amount, nonce);
 
-        // === AegisMessage canonical hash (LockToMint) ===
-        //
-        // Catatan:
-        // - srcChainId diambil dari block.chainid.
-        // - dstChainId & dstBridge masih di-set 0 di v0.2 PoC,
-        //   nanti di v0.3 bisa diisi real target chain / bridge.
-        //
+        // Bentuk canonical Aegis message + hash (LockToMint)
         AegisMessage.Message memory m = AegisMessage.Message({
             srcChainId: uint64(block.chainid),
-            dstChainId: 0,              // TODO: set 80002 untuk Amoy di versi berikutnya
+            dstChainId: dstChainId, // boleh 0 jika belum dikonfigurasi
             srcBridge: address(this),
-            dstBridge: address(0),      // TODO: isi alamat TargetBridge kalau mau full
+            dstBridge: dstBridge,
             token: address(token),
-            // Tergantung desain, kita bisa pilih:
-            // - msg.sender  = pengirim awal
-            // - recipient   = penerima di chain tujuan
-            // Untuk sekarang kita pakai recipient sebagai "user" canonical.
-            user: recipient,
+            user: recipient, // penerima di chain tujuan
             amount: amount,
             nonce: nonce,
             direction: AegisMessage.Direction.LockToMint,
@@ -89,7 +111,11 @@ contract SourceBridge is Ownable {
         });
 
         bytes32 msgHash = m.hash();
-        emit MessageHashEmitted(msgHash, AegisMessage.Direction.LockToMint, nonce);
+        emit MessageHashEmitted(
+            msgHash,
+            AegisMessage.Direction.LockToMint,
+            nonce
+        );
     }
 
     /// @notice Dipanggil relayer/owner setelah melihat event BurnToSource di chain tujuan.
@@ -98,10 +124,13 @@ contract SourceBridge is Ownable {
         address recipient,
         uint256 amount,
         uint256 burnNonce
-    ) external onlyOwner {
+    ) external onlyOwner whenNotPaused {
         require(recipient != address(0), "Recipient cannot be zero");
         require(amount > 0, "Amount must be > 0");
-        require(!processedBurnNonces[burnNonce], "Burn nonce already processed");
+        require(
+            !processedBurnNonces[burnNonce],
+            "Burn nonce already processed"
+        );
 
         processedBurnNonces[burnNonce] = true;
 
@@ -110,8 +139,8 @@ contract SourceBridge is Ownable {
 
         emit UnlockedFromTarget(recipient, amount, burnNonce);
 
-        // (Opsional v0.3+) Di sini kita juga bisa bentuk AegisMessage
-        // untuk arah BurnToUnlock dan emit hash-nya, tapi di v0.2 PoC
-        // cukup dari sisi lock (LockToMint) saja.
+        // (Opsional) bisa juga bentuk AegisMessage di sini untuk BurnToUnlock,
+        // tetapi di desain v0.2, canonical hash utama untuk arah ini
+        // diekspose dari sisi target (TargetBridge.burnToSource).
     }
 }
