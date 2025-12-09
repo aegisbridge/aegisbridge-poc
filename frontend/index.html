@@ -92,14 +92,32 @@
         <!-- Status / logs -->
         <section class="card">
           <h2>Status &amp; Logs</h2>
+
           <div class="status-line">
             <span>Current side:</span>
             <strong id="currentSideLabel">–</strong>
           </div>
+
           <div class="status-line">
             <span>Token balance:</span>
             <strong id="balanceLabel">–</strong>
           </div>
+
+          <div class="status-line">
+            <span>Lock nonce (Sepolia):</span>
+            <strong id="lockNonceLabel">–</strong>
+          </div>
+
+          <div class="status-line">
+            <span>Burn nonce (Amoy):</span>
+            <strong id="burnNonceLabel">–</strong>
+          </div>
+
+          <div class="status-line">
+            <span>Bridge status:</span>
+            <strong id="pausedLabel">–</strong>
+          </div>
+
           <div class="status-line">
             <span>Relayer info:</span>
             <span class="hint tiny">
@@ -114,7 +132,7 @@
 
       <footer class="app-footer">
         <span
-          >AegisBridge v0.4 · testnet prototype · do not use on mainnet</span
+          >AegisBridge v0.4.1 · testnet prototype · do not use on mainnet</span
         >
       </footer>
     </div>

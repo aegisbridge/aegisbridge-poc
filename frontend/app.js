@@ -8,6 +8,13 @@ const ERC20_ABI = [
   "function decimals() view returns (uint8)",
 ];
 
+// View-only ABI for bridge contracts (status & nonces)
+const BRIDGE_VIEW_ABI = [
+  "function lockNonce() view returns (uint256)",
+  "function burnNonce() view returns (uint256)",
+  "function paused() view returns (bool)",
+];
+
 function makeBridgeAbi(lockMethod, burnMethod) {
   const abi = [];
   if (lockMethod) {
@@ -34,6 +41,9 @@ const addressDisplay = document.getElementById("addressDisplay");
 const networkDisplay = document.getElementById("networkDisplay");
 const currentSideLabel = document.getElementById("currentSideLabel");
 const balanceLabel = document.getElementById("balanceLabel");
+const lockNonceLabel = document.getElementById("lockNonceLabel");
+const burnNonceLabel = document.getElementById("burnNonceLabel");
+const pausedLabel = document.getElementById("pausedLabel");
 const bridgeButton = document.getElementById("bridgeButton");
 const directionSelect = document.getElementById("directionSelect");
 const amountInput = document.getElementById("amountInput");
@@ -133,34 +143,99 @@ async function updateUiState() {
   networkDisplay.textContent = label;
   networkDisplay.className = pillClass;
 
-  if (currentAccount && chainId) {
-    try {
-      const { signer } = await ensureProvider();
-      const addr = await signer.getAddress();
+  // default values
+  if (!chainId || !currentAccount) {
+    balanceLabel.textContent = "-";
+    lockNonceLabel.textContent = "-";
+    burnNonceLabel.textContent = "-";
+    pausedLabel.textContent = "-";
+    return;
+  }
 
-      let tokenAddress = null;
-      if (chainId === AEGIS_CONFIG.sepolia.chainIdHex) {
-        tokenAddress = AEGIS_CONFIG.sepolia.tokenAddress;
-      } else if (chainId === AEGIS_CONFIG.amoy.chainIdHex) {
-        tokenAddress = AEGIS_CONFIG.amoy.tokenAddress;
-      }
+  try {
+    const { signer } = await ensureProvider();
+    const addr = await signer.getAddress();
 
-      if (tokenAddress && tokenAddress.startsWith("0x")) {
-        const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
-        const rawBal = await token.balanceOf(addr);
-        const decimals = AEGIS_CONFIG.tokenDecimals;
-        const formatted = ethers.formatUnits(rawBal, decimals);
-        balanceLabel.textContent = `${formatted} tokens`;
-      } else {
-        balanceLabel.textContent = "-";
-      }
-    } catch (err) {
-      // Misalnya RPC lagi error / network changed
-      console.warn("updateUiState balance error:", err);
+    let tokenAddress = null;
+    let bridgeAddress = null;
+    let side = null;
+
+    if (chainId === AEGIS_CONFIG.sepolia.chainIdHex) {
+      tokenAddress = AEGIS_CONFIG.sepolia.tokenAddress;
+      bridgeAddress = AEGIS_CONFIG.sepolia.bridgeAddress;
+      side = "sepolia";
+    } else if (chainId === AEGIS_CONFIG.amoy.chainIdHex) {
+      tokenAddress = AEGIS_CONFIG.amoy.tokenAddress;
+      bridgeAddress = AEGIS_CONFIG.amoy.bridgeAddress;
+      side = "amoy";
+    }
+
+    // Token balance
+    if (tokenAddress && tokenAddress.startsWith("0x")) {
+      const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+      const rawBal = await token.balanceOf(addr);
+      const decimals = AEGIS_CONFIG.tokenDecimals;
+      const formatted = ethers.formatUnits(rawBal, decimals);
+      balanceLabel.textContent = `${formatted} tokens`;
+    } else {
       balanceLabel.textContent = "-";
     }
-  } else {
+
+    // Reset status labels
+    lockNonceLabel.textContent = "-";
+    burnNonceLabel.textContent = "-";
+    pausedLabel.textContent = "-";
+
+    // Bridge status (lock/burn nonce + paused)
+    if (bridgeAddress && bridgeAddress.startsWith("0x")) {
+      const bridge = new ethers.Contract(
+        bridgeAddress,
+        BRIDGE_VIEW_ABI,
+        signer
+      );
+
+      if (side === "sepolia") {
+        try {
+          const [lockNonce, paused] = await Promise.all([
+            bridge.lockNonce().catch(() => null),
+            bridge.paused().catch(() => null),
+          ]);
+          if (lockNonce !== null) {
+            lockNonceLabel.textContent = lockNonce.toString();
+          }
+          if (paused !== null) {
+            pausedLabel.textContent = paused
+              ? "Paused (Sepolia)"
+              : "Active (Sepolia)";
+          }
+        } catch (err) {
+          console.warn("bridge status (sepolia) error:", err);
+        }
+      } else if (side === "amoy") {
+        try {
+          const [burnNonce, paused] = await Promise.all([
+            bridge.burnNonce().catch(() => null),
+            bridge.paused().catch(() => null),
+          ]);
+          if (burnNonce !== null) {
+            burnNonceLabel.textContent = burnNonce.toString();
+          }
+          if (paused !== null) {
+            pausedLabel.textContent = paused
+              ? "Paused (Amoy)"
+              : "Active (Amoy)";
+          }
+        } catch (err) {
+          console.warn("bridge status (amoy) error:", err);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("updateUiState error:", err);
     balanceLabel.textContent = "-";
+    lockNonceLabel.textContent = "-";
+    burnNonceLabel.textContent = "-";
+    pausedLabel.textContent = "-";
   }
 }
 
@@ -228,6 +303,9 @@ bridgeButton.addEventListener("click", async () => {
     } else {
       await handleAmoyToSepolia(amountStr);
     }
+
+    // refresh status after tx
+    await updateUiState();
   } catch (err) {
     console.error(err);
     log(`❌ ${err.message || err}`);
