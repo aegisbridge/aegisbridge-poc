@@ -575,3 +575,167 @@
 [2025-12-09T12:26:41.487Z] [TX] unlockFromTarget(burnNonce=7) sent: 0x919ea5aea7e964c66329b754ea6b6a8e7684e80e154e999fdff38c610e50043b
 [2025-12-09T12:26:51.364Z] [TX] unlockFromTarget(burnNonce=7) confirmed in block 9802899 (status=1)
 [2025-12-09T12:26:51.365Z] [UNLOCK] unlockFromTarget successful for burnNonce=7, tx=undefined
+[2025-12-09T12:48:39.495Z] 
+[LOCK EVENT] Sepolia Locked → nonce=8, amount=100.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0x96174b00d22132ecda5b1c5e306a897b9b2852e2ae7a22218ee4667052da82cb
+[2025-12-09T12:48:39.862Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=100.0, nonce=8
+[2025-12-09T12:48:39.863Z] [TX] mintFromSource(nonce=8) — attempt 1/3
+[2025-12-09T12:48:42.009Z] [TX] mintFromSource(nonce=8) sent: 0x60db971a8675cf0e0f0c2bd79fc64a5e437c158126d5f403326a2521f1a0d3a8
+[2025-12-09T12:48:46.348Z] [TX] mintFromSource(nonce=8) confirmed in block 30222916 (status=1)
+[2025-12-09T12:48:46.349Z] [MINT] mintFromSource successful for nonce=8, tx=undefined
+[2025-12-09T12:49:31.628Z] 
+[BURN EVENT] Amoy BurnToSource → burnNonce=8, amount=100.0, from=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, to=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xa825311008718bc18b7a189e37f2c9d72e78d74b39848cfe0cec5eaf827ad6a8
+[2025-12-09T12:49:31.847Z] [UNLOCK] Preparing unlockFromTarget on Sepolia: recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=100.0, burnNonce=8
+[2025-12-09T12:49:31.848Z] [TX] unlockFromTarget(burnNonce=8) — attempt 1/3
+[2025-12-09T12:49:33.567Z] [TX] unlockFromTarget(burnNonce=8) sent: 0x106e44a823cf6b5989f86724e2bb28dc503a98c35add30d8cb45e1620eff5b59
+[2025-12-09T12:49:40.241Z] [TX] unlockFromTarget(burnNonce=8) confirmed in block 9803009 (status=1)
+[2025-12-09T12:49:40.242Z] [UNLOCK] unlockFromTarget successful for burnNonce=8, tx=undefined
+[2025-12-09T13:21:32.559Z] === AegisBridge Testnet Relayer v0.4.0 === {"env":"testnet"}
+[2025-12-09T13:21:32.560Z] Sepolia RPC : {"url":"https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0"}
+[2025-12-09T13:21:32.561Z] Amoy RPC    : {"url":"https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0"}
+[2025-12-09T13:21:32.562Z] Relayer address: {"address":"0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a"}
+[2025-12-09T13:21:32.563Z] Bridge contracts: {"sepolia":"0x4Fb169EDA4C92de96634595d36571637CFbb4437","amoy":"0xA9E3bf15148EA340e76B851483486ca546eD8018"}
+[2025-12-09T13:21:34.470Z] Health endpoint listening {"port":8081,"env":"testnet"}
+[2025-12-09T13:31:35.495Z] === AegisBridge v0.4.1 Testnet Relayer ===
+[2025-12-09T13:31:35.496Z] Env           : testnet
+[2025-12-09T13:31:35.497Z] Sepolia RPC   : https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T13:31:35.498Z] Amoy RPC      : https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T13:31:35.499Z] Relayer addr  : 0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+[2025-12-09T13:31:35.500Z] 
+[2025-12-09T13:31:35.501Z] Sepolia chainId : 11155111
+[2025-12-09T13:31:35.502Z] Amoy chainId    : 80002
+[2025-12-09T13:31:35.503Z] 
+[2025-12-09T13:31:35.504Z] SourceBridge (Sepolia): 0x4Fb169EDA4C92de96634595d36571637CFbb4437
+[2025-12-09T13:31:35.504Z] ATT (Sepolia)          : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+[2025-12-09T13:31:35.505Z] TargetBridge (Amoy)    : 0xA9E3bf15148EA340e76B851483486ca546eD8018
+[2025-12-09T13:31:35.507Z] wATT (Amoy)            : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+[2025-12-09T13:31:35.508Z] ========================================
+[2025-12-09T13:31:35.509Z] [CONFIG] DRY_RUN=false, MAX_RETRIES=3, RETRY_DELAY_MS=10000
+[2025-12-09T13:31:35.510Z] [CONFIG] DISABLE_SYNC=true, FROM_BLOCK_SEPOLIA=9800900, FROM_BLOCK_AMOY=30205500
+[2025-12-09T13:31:35.510Z] [STATE] Loaded relayer_state.json with 0 lock nonces and 0 burn nonces.
+[2025-12-09T13:31:35.511Z] [HEALTH] HTTP port=8081, interval=5000 ms
+
+[2025-12-09T13:31:35.512Z] [SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.
+[2025-12-09T13:31:35.521Z] Subscribing to live events...
+[2025-12-09T13:31:35.524Z] - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy
+[2025-12-09T13:31:35.526Z] - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
+[2025-12-09T13:31:35.527Z] 
+[2025-12-09T13:31:35.527Z] Press Ctrl+C to exit.
+
+[2025-12-09T13:31:35.535Z] [HEALTH] Server error: listen EADDRINUSE: address already in use :::8081
+[2025-12-09T13:35:55.871Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:00.878Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:00.894Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:05.887Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:05.902Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:10.894Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:10.908Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:15.905Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:15.920Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:20.899Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:20.936Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:25.698Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:25.904Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:30.911Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:30.926Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:35.921Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:35.939Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:40.931Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:40.948Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:45.937Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:45.952Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:50.941Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:50.964Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:36:55.952Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:36:55.967Z] [HEALTH] Amoy ping failed: request timeout
+[2025-12-09T13:37:00.060Z] [HEALTH] Sepolia ping failed: getaddrinfo ENOTFOUND eth-sepolia.g.alchemy.com
+[2025-12-09T13:37:00.064Z] [HEALTH] Amoy ping failed: getaddrinfo ENOTFOUND polygon-amoy.g.alchemy.com
+[2025-12-09T13:37:00.090Z] [HEALTH] Amoy ping failed: getaddrinfo ENOTFOUND polygon-amoy.g.alchemy.com
+[2025-12-09T13:37:00.955Z] [HEALTH] Sepolia ping failed: getaddrinfo ENOTFOUND eth-sepolia.g.alchemy.com
+[2025-12-09T13:37:00.979Z] [HEALTH] Amoy ping failed: getaddrinfo ENOTFOUND polygon-amoy.g.alchemy.com
+[2025-12-09T13:37:10.966Z] [HEALTH] Sepolia ping failed: request timeout
+[2025-12-09T13:45:26.366Z] [ABI] Loaded ABI for SourceBridge from artifacts/contracts/SourceBridge.sol/SourceBridge.json
+[2025-12-09T13:45:26.369Z] [ABI] Loaded ABI for TargetBridge from artifacts/contracts/TargetBridge.sol/TargetBridge.json
+[2025-12-09T13:45:27.330Z] === AegisBridge v0.4.1 Testnet Relayer ===
+[2025-12-09T13:45:27.332Z] Env           : testnet
+[2025-12-09T13:45:27.333Z] Sepolia RPC   : https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T13:45:27.335Z] Amoy RPC      : https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T13:45:27.336Z] Relayer addr  : 0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+[2025-12-09T13:45:27.337Z] 
+[2025-12-09T13:45:27.338Z] Sepolia chainId : 11155111
+[2025-12-09T13:45:27.339Z] Amoy chainId    : 80002
+[2025-12-09T13:45:27.340Z] 
+[2025-12-09T13:45:27.341Z] SourceBridge (Sepolia): 0x4Fb169EDA4C92de96634595d36571637CFbb4437
+[2025-12-09T13:45:27.342Z] ATT (Sepolia)          : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+[2025-12-09T13:45:27.343Z] TargetBridge (Amoy)    : 0xA9E3bf15148EA340e76B851483486ca546eD8018
+[2025-12-09T13:45:27.343Z] wATT (Amoy)            : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+[2025-12-09T13:45:27.344Z] ========================================
+[2025-12-09T13:45:27.345Z] [CONFIG] DRY_RUN=false, MAX_RETRIES=3, RETRY_DELAY_MS=10000
+[2025-12-09T13:45:27.346Z] [CONFIG] DISABLE_SYNC=true, FROM_BLOCK_SEPOLIA=9800900, FROM_BLOCK_AMOY=30205500
+[2025-12-09T13:45:27.346Z] [STATE] Loaded relayer_state.json with 0 lock nonces and 0 burn nonces.
+[2025-12-09T13:45:27.347Z] [HEALTH] HTTP port=8081, interval=5000 ms
+
+[2025-12-09T13:45:27.348Z] [SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.
+[2025-12-09T13:45:27.359Z] Subscribing to live events...
+[2025-12-09T13:45:27.359Z] - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy
+[2025-12-09T13:45:27.360Z] - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
+[2025-12-09T13:45:27.361Z] 
+[2025-12-09T13:45:27.362Z] Press Ctrl+C to exit.
+
+[2025-12-09T13:45:27.369Z] [HEALTH] HTTP health endpoint listening on port 8081
+[2025-12-09T13:53:37.488Z] 
+[LOCK EVENT] Sepolia Locked → nonce=9, amount=100.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xc06a906cba27106f4ff586fe117cd9481c12a95333cb4be077e6d475659e95fb
+[2025-12-09T13:53:37.865Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=100.0, nonce=9
+[2025-12-09T13:53:37.867Z] [TX] mintFromSource(nonce=9) — attempt 1/3
+[2025-12-09T13:53:40.110Z] [TX-ERROR] mintFromSource(nonce=9) failed on attempt 1/3: could not coalesce error
+[2025-12-09T13:53:40.111Z] [TX] Waiting 10000 ms before retry (label=mintFromSource(nonce=9))...
+[2025-12-09T13:53:50.120Z] [TX] mintFromSource(nonce=9) — attempt 2/3
+[2025-12-09T13:53:52.398Z] [TX-ERROR] mintFromSource(nonce=9) failed on attempt 2/3: could not coalesce error
+[2025-12-09T13:53:52.399Z] [TX] Waiting 10000 ms before retry (label=mintFromSource(nonce=9))...
+[2025-12-09T13:54:02.414Z] [TX] mintFromSource(nonce=9) — attempt 3/3
+[2025-12-09T13:54:04.653Z] [TX-ERROR] mintFromSource(nonce=9) failed on attempt 3/3: could not coalesce error
+[2025-12-09T13:54:04.654Z] [TX-ERROR] mintFromSource(nonce=9) giving up after 3 attempts.
+[2025-12-09T13:54:04.655Z] [TX-ERROR-DETAIL] Error: could not coalesce error (error={ "code": -32000, "message": "INTERNAL_ERROR: gas limit is too high" }, payload={ "id": 247, "jsonrpc": "2.0", "method": "eth_sendRawTransaction", "params": [ "0x02f8d5830138822c8507558bdb4b8507558bdbc983010d5494a9e3bf15148ea340e76b851483486ca546ed801880b86429b921fd00000000000000000000000036b95469dd6ea8d1e17c6bc65513e8c9f53ec50a0000000000000000000000000000000000000000000000056bc75e2d631000000000000000000000000000000000000000000000000000000000000000000009c080a0b39c17b4ad3a12c6a7aef49a651c3ccaf87f6a8382b35f3c83b442b384b48d72a01dc0bbafd8d6a1038512db66cf17fba5ad3afc9b8f799571b1bbf716a6745013" ] }, code=UNKNOWN_ERROR, version=6.16.0)
+[2025-12-09T14:04:46.431Z] [ABI] Loaded ABI for SourceBridge from artifacts/contracts/SourceBridge.sol/SourceBridge.json
+[2025-12-09T14:04:46.433Z] [ABI] Loaded ABI for TargetBridge from artifacts/contracts/TargetBridge.sol/TargetBridge.json
+[2025-12-09T14:04:47.302Z] === AegisBridge v0.4.2 Testnet Relayer ===
+[2025-12-09T14:04:47.303Z] Env           : testnet
+[2025-12-09T14:04:47.303Z] Sepolia RPC   : https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T14:04:47.304Z] Amoy RPC      : https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T14:04:47.305Z] Relayer addr  : 0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+[2025-12-09T14:04:47.306Z] 
+[2025-12-09T14:04:47.307Z] Sepolia chainId : 11155111
+[2025-12-09T14:04:47.307Z] Amoy chainId    : 80002
+[2025-12-09T14:04:47.308Z] 
+[2025-12-09T14:04:47.308Z] SourceBridge (Sepolia): 0x4Fb169EDA4C92de96634595d36571637CFbb4437
+[2025-12-09T14:04:47.309Z] ATT (Sepolia)          : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+[2025-12-09T14:04:47.309Z] TargetBridge (Amoy)    : 0xA9E3bf15148EA340e76B851483486ca546eD8018
+[2025-12-09T14:04:47.310Z] wATT (Amoy)            : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+[2025-12-09T14:04:47.311Z] ========================================
+[2025-12-09T14:04:47.311Z] [CONFIG] DRY_RUN=false, MAX_RETRIES=3, RETRY_DELAY_MS=10000
+[2025-12-09T14:04:47.312Z] [CONFIG] DISABLE_SYNC=true, FROM_BLOCK_SEPOLIA=9800900, FROM_BLOCK_AMOY=30205500
+[2025-12-09T14:04:47.312Z] [CONFIG] MINT_GAS_LIMIT=300000, UNLOCK_GAS_LIMIT=300000
+[2025-12-09T14:04:47.313Z] [STATE] Loaded relayer_state.json with 0 lock nonces and 0 burn nonces.
+[2025-12-09T14:04:47.314Z] [HEALTH] HTTP port=8081, interval=5000 ms
+
+[2025-12-09T14:04:47.315Z] [SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.
+[2025-12-09T14:04:47.323Z] Subscribing to live events...
+[2025-12-09T14:04:47.324Z] - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy
+[2025-12-09T14:04:47.325Z] - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
+[2025-12-09T14:04:47.326Z] 
+[2025-12-09T14:04:47.328Z] Press Ctrl+C to exit.
+
+[2025-12-09T14:04:47.334Z] [HEALTH] HTTP health endpoint listening on port 8081
+[2025-12-09T14:06:14.961Z] 
+[LOCK EVENT] Sepolia Locked → nonce=10, amount=10.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xd6599c6b9c28d9b1490092384a761a2620cac7fad029b4447e056e9ee765c78b
+[2025-12-09T14:06:16.147Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=10.0, nonce=10, gasLimit=300000
+[2025-12-09T14:06:16.148Z] [TX] mintFromSource(nonce=10) — attempt 1/3
+[2025-12-09T14:06:18.026Z] [TX] mintFromSource(nonce=10) sent: 0xf0c90ebf18224fd276aa1335b697a23cde0a655bd5f8ec07b84c9292b3073001
+[2025-12-09T14:06:20.683Z] [TX] mintFromSource(nonce=10) confirmed in block 30226020 (status=1)
+[2025-12-09T14:06:20.685Z] [MINT] mintFromSource successful for nonce=10, tx=undefined
+[2025-12-09T14:07:11.157Z] 
+[BURN EVENT] Amoy BurnToSource → burnNonce=10, amount=10.0, from=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, to=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xe1d764a8a76011f0013b6f600708822150febdf7945054c2755f8f060a290799
+[2025-12-09T14:07:11.375Z] [UNLOCK] Preparing unlockFromTarget on Sepolia: recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=10.0, burnNonce=10, gasLimit=300000
+[2025-12-09T14:07:11.376Z] [TX] unlockFromTarget(burnNonce=10) — attempt 1/3
+[2025-12-09T14:07:12.724Z] [TX] unlockFromTarget(burnNonce=10) sent: 0x2dcf5cc19d219542f9fe4962ec3033d925ffcc0ca8a0002beb1379d4d965d2dc
+[2025-12-09T14:07:25.582Z] [TX] unlockFromTarget(burnNonce=10) confirmed in block 9803375 (status=1)
+[2025-12-09T14:07:25.584Z] [UNLOCK] unlockFromTarget successful for burnNonce=10, tx=undefined

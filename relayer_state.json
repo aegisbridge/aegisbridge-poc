@@ -1,14 +1,26 @@
 {
+  "env": "testnet",
+  "startedAt": "2025-12-09T13:21:32.498Z",
+  "lastTickAt": "2025-12-09T13:31:50.297Z",
+  "lastError": null,
+  "sepolia": {
+    "rpcUrl": "https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0",
+    "bridge": "0x4Fb169EDA4C92de96634595d36571637CFbb4437",
+    "ok": true,
+    "lastBlock": 9803206,
+    "lastError": null
+  },
+  "amoy": {
+    "rpcUrl": "https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0",
+    "bridge": "0xA9E3bf15148EA340e76B851483486ca546eD8018",
+    "ok": true,
+    "lastBlock": 30224640,
+    "lastError": null
+  },
   "processedLockNonces": {
-    "4": true,
-    "5": true,
-    "6": true,
-    "7": true
+    "10": true
   },
   "processedBurnNonces": {
-    "4": true,
-    "5": true,
-    "6": true,
-    "7": true
+    "10": true
   }
 }
