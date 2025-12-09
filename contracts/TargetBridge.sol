@@ -2,68 +2,98 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+
 import "./WrappedTestToken.sol";
+import "./AegisMessage.sol";
 
 /// @title TargetBridge
 /// @notice Bridge di sisi chain tujuan:
-///         - mint wATT berdasarkan lock di source
-///         - burn wATT untuk klaim balik ATT di source.
+///         - mint wATT saat ada lock di source
+///         - burn wATT saat user mau balik ke source (nanti di-unlock di SourceBridge).
+/// @dev v0.2: tambah emit hash canonical AegisMessage saat burnToSource (BurnToUnlock).
 contract TargetBridge is Ownable {
-    WrappedTestToken public immutable wrappedToken;
+    using AegisMessage for AegisMessage.Message;
 
-    // Nonce lock dari chain asal yang sudah diproses → cegah double-mint.
+    WrappedTestToken public immutable wrapped;
+
+    // Nonce lock yang sudah diproses (dari SourceBridge) → cegah double mint.
     mapping(uint256 => bool) public processedNonces;
 
-    // Counter burn di chain tujuan → dipakai sebagai id unik untuk unlock di source.
+    // Counter burnNonce lokal di target chain.
     uint256 public burnNonce;
 
-    event Minted(
-        address indexed recipient,
-        uint256 amount,
-        uint256 indexed nonce
-    );
+    event MintFromSource(address indexed to, uint256 amount, uint256 nonce);
 
     event BurnToSource(
         address indexed from,
         address indexed to,
         uint256 amount,
-        uint256 indexed burnNonce
+        uint256 nonce
     );
 
-    constructor(address _wrappedToken) Ownable(msg.sender) {
-        require(_wrappedToken != address(0), "Token address cannot be zero");
-        wrappedToken = WrappedTestToken(_wrappedToken);
+    /// @notice Hash canonical AegisMessage yang dipakai off-chain / PQC layer.
+    /// @dev Disamakan dengan SourceBridge untuk memudahkan indexing.
+    event MessageHashEmitted(
+        bytes32 indexed msgHash,
+        AegisMessage.Direction direction,
+        uint256 indexed nonce
+    );
+
+    constructor(address _wrapped) Ownable(msg.sender) {
+        wrapped = WrappedTestToken(_wrapped);
     }
 
-    /// @notice Dipanggil oleh relayer/owner setelah ada lock di SourceBridge.
-    /// @dev Di versi simple ini belum ada verifikasi cryptographic proof, hanya nonce guard.
+    /// @notice Dipanggil relayer/owner setelah melihat event Locked di source.
+    /// @dev Satu `nonce` hanya boleh dipakai sekali.
     function mintFromSource(
-        address recipient,
+        address to,
         uint256 amount,
         uint256 nonce
     ) external onlyOwner {
-        require(recipient != address(0), "Recipient cannot be zero");
-        require(amount > 0, "Amount must be > 0");
         require(!processedNonces[nonce], "Nonce already processed");
-
         processedNonces[nonce] = true;
-        wrappedToken.mint(recipient, amount);
 
-        emit Minted(recipient, amount, nonce);
+        wrapped.mint(to, amount);
+
+        emit MintFromSource(to, amount, nonce);
+        // Catatan: untuk arah LockToMint kita sudah punya hash di SourceBridge.lock().
+        // Di sini kita tidak perlu re-hash lagi di v0.2.
     }
 
-    /// @notice User membakar wATT di chain tujuan untuk klaim balik ATT di chain asal.
-    /// @param amount   Jumlah wATT yang dibakar.
-    /// @param recipient Alamat yang akan menerima ATT di source chain.
-    function burnToSource(uint256 amount, address recipient) external {
+    /// @notice User di target chain membakar wATT untuk kembali ke source chain.
+    /// @dev Emit BurnToSource + hash canonical AegisMessage (BurnToUnlock).
+    function burnToSource(uint256 amount, address to) external {
         require(amount > 0, "Amount must be > 0");
-        require(recipient != address(0), "Recipient cannot be zero");
+        require(to != address(0), "Target recipient cannot be zero");
 
-        burnNonce += 1;
+        burnNonce++;
 
-        // Burn wATT dari wallet pemanggil (user).
-        wrappedToken.burn(msg.sender, amount);
+        // ✅ Kembali ke pola lama: panggil burn() di WrappedTestToken
+        wrapped.burn(msg.sender, amount);
 
-        emit BurnToSource(msg.sender, recipient, amount, burnNonce);
+        emit BurnToSource(msg.sender, to, amount, burnNonce);
+
+        // === AegisMessage canonical hash (BurnToUnlock) ===
+        AegisMessage.Message memory m = AegisMessage.Message({
+            srcChainId: uint64(block.chainid),
+            dstChainId: 0,              // TODO: isi 11155111 (Sepolia) di versi berikutnya
+            srcBridge: address(this),
+            dstBridge: address(0),      // TODO: isi alamat SourceBridge kalau mau full
+            token: address(wrapped),
+            // Konsisten dengan SourceBridge.lock (user = penerima di chain tujuan),
+            // di sini kita pakai 'to' (penerima di source) sebagai user canonical.
+            user: to,
+            amount: amount,
+            nonce: burnNonce,
+            direction: AegisMessage.Direction.BurnToUnlock,
+            timestamp: uint64(block.timestamp)
+        });
+
+        bytes32 msgHash = m.hash();
+        emit MessageHashEmitted(
+            msgHash,
+            AegisMessage.Direction.BurnToUnlock,
+            burnNonce
+        );
     }
 }
