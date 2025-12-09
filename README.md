@@ -30,18 +30,26 @@ This PoC uses a minimal set of contracts:
   Lives on the source chain.  
   - Accepts `lock(amount, recipient)` calls  
   - Holds locked ATT  
-  - Emits events with `(user, amount, nonce)`  
-  - In v0.2, also exposes `unlockFromTarget(user, amount, burnNonce)` and tracks a mapping of processed burn nonces to prevent replay
+  - Emits events with `(sender, recipient, amount, nonce)`  
+  - In v0.2, also exposes `unlockFromTarget(recipient, amount, burnNonce)` and tracks a mapping of processed burn nonces to prevent replay  
+  - Emits a canonical Aegis message hash via `MessageHashEmitted(msgHash, direction, nonce)` for **LockToMint** flows
 
 - **`TargetBridge`**  
   Lives on the target chain.  
   - Mints wATT with `mintFromSource(user, amount, nonce)`  
   - Burns wATT with `burnToSource(amount, targetUser)`  
   - Tracks `processedNonces[nonce]` to prevent replay on **lock → mint**  
-  - Emits `BurnToSource` events used to drive **burn → unlock** on the source chain
+  - Emits `BurnToSource` events used to drive **burn → unlock** on the source chain  
+  - Emits a canonical Aegis message hash via `MessageHashEmitted(msgHash, direction, nonce)` for **BurnToUnlock** flows
+
+- **`AegisMessage`**  
+  Library that defines the **canonical cross-chain message format** and hashing function for AegisBridge:
+  - `enum Direction { LockToMint, BurnToUnlock }`
+  - `struct Message { srcChainId, dstChainId, srcBridge, dstBridge, token, user, amount, nonce, direction, timestamp }`
+  - `function hash(Message memory m) internal pure returns (bytes32)`
 
 > **PQC integration (future):**  
-> In later versions, cross-chain messages (lock → mint, burn → unlock) would be attested by PQC-signed proofs from relayers / committees, and the bridge contracts would verify those attestations on-chain. The current PoC treats the relayer as trusted.
+> In later versions, cross-chain messages (lock → mint, burn → unlock) would be attested by PQC-signed proofs from relayers / committees, and the bridge contracts would verify those attestations on-chain. The current PoC treats the relayer as trusted, but already emits canonical message hashes to make future PQC-aware layers easier to plug in.
 
 ---
 
@@ -51,8 +59,9 @@ This PoC uses a minimal set of contracts:
 contracts/
   TestToken.sol           # ATT on source chain
   WrappedTestToken.sol    # wATT on target chain
-  SourceBridge.sol        # Lock + unlock bridge on source
-  TargetBridge.sol        # Mint + burn bridge on target
+  SourceBridge.sol        # Lock + unlock bridge on source (v0.2)
+  TargetBridge.sol        # Mint + burn bridge on target (v0.2)
+  AegisMessage.sol        # Canonical AegisBridge message model + hash
 
 scripts/
   # Local (Hardhat node) PoC
@@ -71,7 +80,7 @@ scripts/
   amoy_burn_to_sepolia.js       # Burn wATT on Amoy (emits BurnToSource event)
   sepolia_unlock_from_amoy.js   # Unlock ATT on Sepolia based on burnNonce
 
-  testnet_relayer.js            # (Optional) future relayer to automate events → tx
+  testnet_relayer.js            # Testnet relayer to automate events → tx (v0.2)
 
 deployments/
   local_relayer.json            # Local deployment addresses for relayer/local tests
@@ -230,9 +239,9 @@ This confirms:
 - The source chain can track processed burn nonces (to prevent replay on unlock).
 - Funds move correctly between user ↔ bridge contracts.
 
-> ⚠️ On Windows you may see:
-> `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\winsync.c, line 76`  
-> This is a known Node.js/Hardhat quirk on Windows. As long as the tx logs are correct, it is safe to ignore for this PoC.
+> ⚠️ On Windows, you may see:  
+> `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76`  
+> This is a Node.js/Hardhat quirk on Windows. As long as the tx logs are correct, it is safe to ignore for this PoC.
 
 ---
 
@@ -251,8 +260,8 @@ The flow:
 4. Unlock ATT on Sepolia via `SourceBridge.unlockFromTarget(...)`
 5. Protect both directions using **nonce-based replay protection**
 
-> 🔐 Currently, the relayer step is done manually via scripts.  
-> In a future iteration, a dedicated relayer process will listen to events on one chain and call the corresponding function on the other chain automatically.
+> 🔐 Currently, the relayer step can be run manually via scripts or automated using `testnet_relayer.js`.  
+> In a future iteration, a dedicated relayer process will listen to events on one chain and call the corresponding function on the other chain with more advanced safety checks and PQC-aware attestation.
 
 ### 0. Current Example Deployments (from latest v0.2 run)
 
@@ -524,12 +533,60 @@ This confirms:
 
 ---
 
+## Aegis Message Model & Hash Emission (v0.2)
+
+Starting in v0.2, AegisBridge defines a **canonical cross-chain message format** via the `AegisMessage` library. This is meant to be the “single source of truth” for what gets attested (and eventually PQC-signed) by off-chain relayers / committees.
+
+```txt
+Message {
+  srcChainId   // chainId where the message originates
+  dstChainId   // destination chainId
+  srcBridge    // SourceBridge / TargetBridge emitting the event
+  dstBridge    // bridge contract on the opposite chain (optional in v0.2)
+  token        // ATT (source) or wATT (target)
+  user         // end user wallet (recipient on the other chain)
+  amount       // bridged amount
+  nonce        // lock nonce or burn nonce
+  direction    // LockToMint or BurnToUnlock
+  timestamp    // unix seconds when the message was formed
+}
+```
+
+The library also exposes:
+
+- `enum Direction { LockToMint, BurnToUnlock }`
+- `function hash(Message memory m) internal pure returns (bytes32)`
+
+Both `SourceBridge` and `TargetBridge` emit a derived message hash:
+
+- On **lock** (Sepolia → Amoy direction):
+  - `SourceBridge.lock` emits:
+    - `Locked(sender, recipient, amount, nonce)`  
+    - `MessageHashEmitted(msgHash, Direction.LockToMint, nonce)`
+- On **burn** (Amoy → Sepolia direction):
+  - `TargetBridge.burnToSource` emits:
+    - `BurnToSource(from, to, amount, burnNonce)`  
+    - `MessageHashEmitted(msgHash, Direction.BurnToUnlock, burnNonce)`
+
+In v0.2, `msgHash` is primarily emitted for **observability and future-proofing**:
+
+- Off-chain relayers can reconstruct the same `Message` struct and verify that:
+  - Their computed hash matches the on-chain `msgHash`
+  - They are attesting to a well-defined, stable message format
+- Future PQC-aware layers can:
+  - Treat `hash(Message)` as the canonical payload to sign  
+  - Use signatures / quorum attestation on this hash to gate mint/unlock calls
+
+The contracts themselves still treat the relayer as trusted in v0.2, but the message model makes it easier to introduce **PQC-secured attestation** in later versions without redesigning the bridge.
+
+---
+
 ## Known Issues / Notes
 
 - On Windows, you may see assertions like:
 
   ```txt
-  Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\winsync.c, line 76
+  Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
   ```
 
   This is a Node.js/Hardhat/Windows interaction issue.  
@@ -555,14 +612,10 @@ This repository is an early exploration of AegisBridge. Next logical steps:
      - Tracks processed nonces and logs events
 
 2. **Message Model & PQC-Aware Design**
-   - Define a canonical cross-chain message format, e.g.:
-
-     ```txt
-     { srcChainId, dstChainId, token, amount, user, nonce, direction, timestamp }
-     ```
-
+   - Build on the existing `AegisMessage` model:
+     - `{ srcChainId, dstChainId, srcBridge, dstBridge, token, amount, user, nonce, direction, timestamp }`
    - Plan how PQC signatures (e.g. Dilithium) could be used to attest these messages off-chain.
-   - Design how the bridge contracts would verify PQC-based attestations.
+   - Design how the bridge contracts would verify PQC-based attestations (e.g. via validator sets, multi-sig, or future precompiles).
 
 3. **Multi-Token / Multi-Chain Support**
    - Support multiple ERC-20 tokens
