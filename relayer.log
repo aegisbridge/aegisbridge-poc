@@ -509,3 +509,69 @@
 [2025-12-09T08:22:13.995Z] [TX] unlockFromTarget(burnNonce=4) sent: 0x675dbf9edd8c68b735eac9a8067f2fba0d757264a01149b61649c9ae9f361cc2
 [2025-12-09T08:22:28.823Z] [TX] unlockFromTarget(burnNonce=4) confirmed in block 9801738 (status=1)
 [2025-12-09T08:22:28.824Z] [UNLOCK] unlockFromTarget successful for burnNonce=4, tx=undefined
+[2025-12-09T11:52:35.948Z] === AegisBridge v0.3.1 Testnet Relayer ===
+[2025-12-09T11:52:35.951Z] Sepolia RPC : https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T11:52:35.952Z] Amoy RPC    : https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T11:52:35.953Z] Deployer/Relayer address: 0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+[2025-12-09T11:52:35.953Z] 
+[2025-12-09T11:52:35.954Z] Sepolia chainId : 11155111
+[2025-12-09T11:52:35.956Z] Amoy    chainId : 80002
+[2025-12-09T11:52:35.956Z] 
+[2025-12-09T11:52:35.957Z] SourceBridge (Sepolia): 0x4Fb169EDA4C92de96634595d36571637CFbb4437
+[2025-12-09T11:52:35.958Z] ATT (Sepolia)        : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+[2025-12-09T11:52:35.959Z] TargetBridge (Amoy)  : 0xA9E3bf15148EA340e76B851483486ca546eD8018
+[2025-12-09T11:52:35.959Z] wATT (Amoy)          : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+[2025-12-09T11:52:35.960Z] ========================================
+[2025-12-09T11:52:35.960Z] [CONFIG] DRY_RUN=false, MAX_RETRIES=3, RETRY_DELAY_MS=10000
+[2025-12-09T11:52:35.961Z] [CONFIG] DISABLE_SYNC=true, FROM_BLOCK_SEPOLIA=9800900, FROM_BLOCK_AMOY=30205500
+[2025-12-09T11:52:35.962Z] [STATE] Loaded relayer_state.json with 1 lock nonces and 1 burn nonces.
+[2025-12-09T11:52:35.963Z] 
+[2025-12-09T11:52:35.964Z] [SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.
+[2025-12-09T11:52:35.964Z] Subscribing to live events...
+[2025-12-09T11:52:35.965Z] - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy
+[2025-12-09T11:52:35.966Z] - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
+[2025-12-09T11:52:35.967Z] 
+[2025-12-09T11:52:35.968Z] Press Ctrl+C to exit.
+
+[2025-12-09T12:02:37.485Z] 
+[LOCK EVENT] Sepolia Locked → nonce=5, amount=0.1, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0x6cb82eacfdc0e5f9ac5e385784d3baf2d98259a697d378a383915caed89a1c1b
+[2025-12-09T12:02:37.866Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=0.1, nonce=5
+[2025-12-09T12:02:37.868Z] [TX] mintFromSource(nonce=5) — attempt 1/3
+[2025-12-09T12:02:40.153Z] [TX] mintFromSource(nonce=5) sent: 0x31c9622f60c895cf4876217e4e2f9cadb810f2c4a4a85b974f12a5586225150b
+[2025-12-09T12:02:46.517Z] [TX] mintFromSource(nonce=5) confirmed in block 30221075 (status=1)
+[2025-12-09T12:02:46.518Z] [MINT] mintFromSource successful for nonce=5, tx=undefined
+[2025-12-09T12:03:47.367Z] 
+[BURN EVENT] Amoy BurnToSource → burnNonce=5, amount=0.1, from=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, to=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xc3a5aca13c88c65a1f0617e89f21a6aa76494929aeecccb6b1048f73133a6751
+[2025-12-09T12:03:47.580Z] [UNLOCK] Preparing unlockFromTarget on Sepolia: recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=0.1, burnNonce=5
+[2025-12-09T12:03:47.581Z] [TX] unlockFromTarget(burnNonce=5) — attempt 1/3
+[2025-12-09T12:03:48.948Z] [TX] unlockFromTarget(burnNonce=5) sent: 0x3a410b70d628d9a08441340d48f613948d99af2f2a46243eefa4cd47bfb69b54
+[2025-12-09T12:04:04.689Z] [TX] unlockFromTarget(burnNonce=5) confirmed in block 9802791 (status=1)
+[2025-12-09T12:04:04.690Z] [UNLOCK] unlockFromTarget successful for burnNonce=5, tx=undefined
+[2025-12-09T12:13:14.363Z] 
+[LOCK EVENT] Sepolia Locked → nonce=6, amount=500.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xe171ab6656c26fcebe573a9fd519164b8f68fd14bac2c25c6792e153490c3773
+[2025-12-09T12:13:14.739Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=500.0, nonce=6
+[2025-12-09T12:13:14.739Z] [TX] mintFromSource(nonce=6) — attempt 1/3
+[2025-12-09T12:13:16.996Z] [TX] mintFromSource(nonce=6) sent: 0xaff5c2a72f8b9ebae230c05f4f9f59b783bfacedb009b1b11acc4fc1946de609
+[2025-12-09T12:13:21.744Z] [TX] mintFromSource(nonce=6) confirmed in block 30221499 (status=1)
+[2025-12-09T12:13:21.746Z] [MINT] mintFromSource successful for nonce=6, tx=undefined
+[2025-12-09T12:15:19.484Z] 
+[BURN EVENT] Amoy BurnToSource → burnNonce=6, amount=100.0, from=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, to=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xcaee7e869994f2f5bdfedfd9c45cc022cfde87e6983253f056c7fe87908944e6
+[2025-12-09T12:15:19.702Z] [UNLOCK] Preparing unlockFromTarget on Sepolia: recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=100.0, burnNonce=6
+[2025-12-09T12:15:19.704Z] [TX] unlockFromTarget(burnNonce=6) — attempt 1/3
+[2025-12-09T12:15:21.069Z] [TX] unlockFromTarget(burnNonce=6) sent: 0x0ee36baa18622e1c19d51d6de56480180cfa9bc5b5fb9d2b1f3650125d641122
+[2025-12-09T12:15:38.360Z] [TX] unlockFromTarget(burnNonce=6) confirmed in block 9802846 (status=1)
+[2025-12-09T12:15:38.361Z] [UNLOCK] unlockFromTarget successful for burnNonce=6, tx=undefined
+[2025-12-09T12:26:15.615Z] 
+[LOCK EVENT] Sepolia Locked → nonce=7, amount=10.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0xe4c3817e3f6121919fb5bff061e95cc601d46abe7d04474b1f065c5a25db3a8c
+[2025-12-09T12:26:15.987Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=10.0, nonce=7
+[2025-12-09T12:26:15.988Z] [TX] mintFromSource(nonce=7) — attempt 1/3
+[2025-12-09T12:26:18.224Z] [TX] mintFromSource(nonce=7) sent: 0xe71bdf9cddc4e1f1c14961a3a75c6c1b30cdb4b8c63f28a51b9526c30918bb73
+[2025-12-09T12:26:20.220Z] [TX] mintFromSource(nonce=7) confirmed in block 30222020 (status=1)
+[2025-12-09T12:26:20.221Z] [MINT] mintFromSource successful for nonce=7, tx=undefined
+[2025-12-09T12:26:39.964Z] 
+[BURN EVENT] Amoy BurnToSource → burnNonce=7, amount=10.0, from=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, to=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0x63b060be4f61bdc998daabfad4335acc8dc31dac2cddbd4766ddc497fe70ee58
+[2025-12-09T12:26:40.188Z] [UNLOCK] Preparing unlockFromTarget on Sepolia: recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=10.0, burnNonce=7
+[2025-12-09T12:26:40.189Z] [TX] unlockFromTarget(burnNonce=7) — attempt 1/3
+[2025-12-09T12:26:41.487Z] [TX] unlockFromTarget(burnNonce=7) sent: 0x919ea5aea7e964c66329b754ea6b6a8e7684e80e154e999fdff38c610e50043b
+[2025-12-09T12:26:51.364Z] [TX] unlockFromTarget(burnNonce=7) confirmed in block 9802899 (status=1)
+[2025-12-09T12:26:51.365Z] [UNLOCK] unlockFromTarget successful for burnNonce=7, tx=undefined

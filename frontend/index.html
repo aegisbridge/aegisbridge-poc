@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AegisBridge v0.4 – Testnet dApp</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <link rel="stylesheet" href="./style.css" />
+
+    <!-- Ethers.js v6 UMD for browser (NO integrity/hash, biar tidak diblokir) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.6.1/ethers.umd.min.js"></script>
+
+    <!-- Config (addresses, chain IDs, method names) -->
+    <script src="./config.js" defer></script>
+
+    <!-- App logic -->
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div>
+          <h1>AegisBridge Testnet dApp</h1>
+          <p class="subtitle">
+            Sepolia ⇄ Polygon Amoy · demo only · powered by AegisBridge
+          </p>
+        </div>
+        <div class="wallet-box">
+          <div id="networkDisplay" class="pill pill-muted">Not connected</div>
+          <button id="connectButton" class="btn-primary">Connect Wallet</button>
+          <div id="addressDisplay" class="address-text">–</div>
+        </div>
+      </header>
+
+      <main class="main-grid">
+        <!-- Bridge form -->
+        <section class="card">
+          <h2>Bridge ATT ⇄ wATT</h2>
+          <p class="card-desc">
+            Lock test tokens on the source chain and receive wrapped tokens on
+            the target chain (relayer must be running).
+          </p>
+
+          <div class="field">
+            <label for="directionSelect">Direction</label>
+            <select id="directionSelect">
+              <option value="SEPOLIA_TO_AMOY">
+                Sepolia → Amoy (lock → mint)
+              </option>
+              <option value="AMOY_TO_SEPOLIA">
+                Amoy → Sepolia (burn → unlock)
+              </option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="amountInput">Amount</label>
+            <input
+              id="amountInput"
+              type="number"
+              min="0"
+              step="0.0001"
+              placeholder="e.g. 10"
+            />
+          </div>
+
+          <div class="field">
+            <label for="recipientInput">
+              Recipient on target chain
+              <span class="hint">(leave empty to use your current address)</span>
+            </label>
+            <input
+              id="recipientInput"
+              type="text"
+              placeholder="0x... (optional)"
+            />
+          </div>
+
+          <button id="bridgeButton" class="btn-primary btn-full">
+            Bridge Tokens
+          </button>
+
+          <p class="hint tiny">
+            1. dApp will check allowance &amp; send <code>approve</code> if
+            needed.<br />
+            2. Then it calls the bridge lock/burn method from your wallet.<br />
+            3. Relayer picks up events and finalizes mint/unlock on the other
+            chain.
+          </p>
+        </section>
+
+        <!-- Status / logs -->
+        <section class="card">
+          <h2>Status &amp; Logs</h2>
+          <div class="status-line">
+            <span>Current side:</span>
+            <strong id="currentSideLabel">–</strong>
+          </div>
+          <div class="status-line">
+            <span>Token balance:</span>
+            <strong id="balanceLabel">–</strong>
+          </div>
+          <div class="status-line">
+            <span>Relayer info:</span>
+            <span class="hint tiny">
+              check <code>relayer.log</code> in your Node process for event
+              flow
+            </span>
+          </div>
+
+          <pre id="logArea" class="log-area">// logs will appear here…</pre>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        <span
+          >AegisBridge v0.4 · testnet prototype · do not use on mainnet</span
+        >
+      </footer>
+    </div>
+  </body>
+</html>
