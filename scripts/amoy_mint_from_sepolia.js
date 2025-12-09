@@ -11,7 +11,7 @@ async function main() {
 
   // ====== SETTING MANUAL DI SINI ======
   const AMOUNT = "1000"; // harus sama dengan yang di-lock di Sepolia
-  const NONCE  = 7;      // pakai nonce dari sepolia_lock.js (sekarang: 6)
+  const NONCE  = 1;      // pakai nonce dari sepolia_lock.js (sekarang: 6)
   // ====================================
 
   const wAtt = await ethers.getContractAt("WrappedTestToken", cfg.amoy.wATT);
