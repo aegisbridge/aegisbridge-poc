@@ -1,42 +1,86 @@
-# AegisBridge – AegisMessage Model (v0.2)
+# AegisMessage Model (AegisBridge v0.2)
 
-This document describes the canonical cross-chain message format used by AegisBridge v0.2 and how it is emitted on-chain as a hash. The goal is to provide a stable foundation for future PQC-aware relayers and off-chain verifiers.
+This document describes the canonical **AegisMessage** model used by AegisBridge v0.2 to represent
+cross-chain bridge operations as structured messages with deterministic hashes.
 
----
+The goal is to have a stable, chain-agnostic message format that can later be:
 
-## 1. Motivation
+- Signed by **post-quantum (PQC)** schemes off-chain  
+- Verified by **relayers / committees**  
+- Indexed and audited by explorers or monitoring tools  
 
-AegisBridge transmits value between two chains (e.g. Sepolia ↔ Amoy) using a simple lock/mint/burn/unlock pattern.
-
-Beyond the raw events (`Locked`, `MintedFromSource`, `BurnToSource`, `UnlockedFromTarget`), it is useful to have a **canonical, chain-agnostic message format** that describes “what happened” in a way that:
-
-- Can be hashed deterministically
-- Can be signed off-chain by relayers or committees (e.g. using PQC signatures)
-- Can be verified by users, dashboards, and future on-chain contracts
-
-This is the role of `AegisMessage`.
+Even though v0.2 still treats the relayer as trusted, the contracts already emit a canonical
+`AegisMessage` hash for each important bridge operation.
 
 ---
 
-## 2. Message Structure
+## 1. Design Goals
 
-The message is defined in `contracts/AegisMessage.sol`:
+The message model is designed to:
+
+1. **Uniquely identify a bridge action**  
+   Each lock, mint, burn, and unlock should map to a deterministic message hash.
+
+2. **Be chain-agnostic**  
+   The same logical action can be understood and verified off-chain without needing internal
+   contract state.
+
+3. **Be PQC-ready**  
+   Message hashes should be compatible with PQC signature schemes (e.g. Dilithium, Falcon, etc.).  
+   The on-chain contracts only emit hashes; relayers or committees sign / verify off-chain.
+
+4. **Avoid replay attacks**  
+   Use chain IDs + bridge addresses + nonces so that a message is only valid for a specific
+   source/target pair and direction.
+
+---
+
+## 2. Solidity Structs & Enums
+
+The message model is implemented in **`contracts/AegisMessage.sol`**.
+
+At a high level, we have:
 
 ```solidity
-enum Direction {
-    LockToMint,
-    BurnToUnlock
-}
+pragma solidity ^0.8.20;
 
-struct Message {
-    uint64 srcChainId;
-    uint64 dstChainId;
-    address srcBridge;
-    address dstBridge;
-    address token;
-    address user;
-    uint256 amount;
-    uint256 nonce;
-    Direction direction;
-    uint64 timestamp;
+library AegisMessage {
+    enum Direction {
+        LockToMint,
+        BurnToUnlock
+    }
+
+    struct Message {
+        Direction direction;
+        uint256 srcChainId;
+        uint256 dstChainId;
+
+        address srcBridge;
+        address dstBridge;
+
+        address token;
+        address user;     // recipient on target (for lock→mint) or source (for burn→unlock)
+        uint256 amount;
+        uint256 nonce;    // lockNonce or burnNonce
+
+        uint256 timestamp; // block.timestamp at the time of emission
+    }
+
+    function hash(Message memory m) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("AegisMessage_v1"),
+                m.direction,
+                m.srcChainId,
+                m.dstChainId,
+                m.srcBridge,
+                m.dstBridge,
+                m.token,
+                m.user,
+                m.amount,
+                m.nonce,
+                m.timestamp
+            )
+        );
+    }
 }
