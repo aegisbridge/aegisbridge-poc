@@ -1,137 +1,98 @@
-# AegisBridge PoC
+# AegisBridge PoC (v0.2)
 
 AegisBridge is an experimental cross-chain bridge prototype designed as a stepping stone toward a **quantum-resilient, PQC-aware bridge protocol**.
 
 This PoC focuses on:
 
-- Lock tokens on a **source side**
-- Mint wrapped tokens on a **target side**
-- Prevent double-mint using a nonce-based replay protection
+- A simple **lock → mint → burn → unlock** value flow
+- **Nonce-based replay protection** on both directions
+- A fully automated **local roundtrip** (lock + mint + burn + unlock)
+- A **public testnet v0.2 two-way bridge**: **Ethereum Sepolia ↔ Polygon Amoy**
+- A clear separation between **v0.1 (legacy one-way)** and **v0.2 (two-way)** testnet deployments
 
-> ⚠️ **Security disclaimer:**  
-> This is experimental PoC code for learning and prototyping.  
-> **Do not use on mainnet** or for real value.
-
----
-
-## High-Level Idea
-
-The long-term vision of AegisBridge:
-
-- Become a **secure backbone for multi-chain interoperability**.
-- Be designed to survive the **post-quantum era**, where classical ECDSA/ECC signatures may be broken.
-- Start from a simple, understandable PoC → then evolve into:
-  - multi-validator bridge,
-  - post-quantum–aware relayer design,
-  - and eventually, standardized PQC-based security primitives.
-
-This repo is **Phase 0: Local PoC**.
+The long-term goal of AegisBridge is to evolve this design into a bridge that validates cross-chain messages using **post-quantum cryptography (PQC)** and secure relayer sets.
 
 ---
 
-## Contracts Overview
+## Architecture Overview
 
-### 1. `TestToken.sol` (ATT)
+This PoC uses a minimal set of contracts:
 
-- Simple ERC20 token used as the **native asset on the source side**.
-- Mints a fixed supply (e.g. 1,000,000 ATT) to the deployer.
-- Used to simulate users locking assets into the bridge.
+- **`TestToken` (ATT)**  
+  ERC-20 token on the **source chain** (e.g. Sepolia).  
+  Used as the asset being bridged. In the current PoC, it is a simple test token.
 
-### 2. `AegisBridge.sol` (single-chain prototype)
+- **`WrappedTestToken` (wATT)**  
+  ERC-20 token on the **target chain** (e.g. Amoy).  
+  Minted 1:1 to represent locked ATT on the source chain.
 
-- Early, 1-chain version of a bridge-like contract.
-- Can lock/unlock `TestToken` on a single network.
-- Useful for understanding the basic **approve → lock → unlock** flow before going multi-side.
+- **`SourceBridge`**  
+  Lives on the source chain.  
+  - Accepts `lock(amount, recipient)` calls  
+  - Holds locked ATT  
+  - Emits events with `(user, amount, nonce)`  
+  - In v0.2, also exposes `unlockFromTarget(user, amount, burnNonce)` and tracks a mapping of processed burn nonces to prevent replay
 
-### 3. `SourceBridge.sol`
+- **`TargetBridge`**  
+  Lives on the target chain.  
+  - Mints wATT with `mintFromSource(user, amount, nonce)`  
+  - Burns wATT with `burnToSource(amount, targetUser)`  
+  - Tracks `processedNonces[nonce]` to prevent replay on **lock → mint**  
+  - Emits `BurnToSource` events used to drive **burn → unlock** on the source chain
 
-- Deployed on the **source side**.
-- Holds a reference to the original `TestToken` (ATT).
-- Exposes:
-
-  ```solidity
-  function lock(uint256 amount, address recipient) external;
-  ```
-
-- When called:
-  - `transferFrom(msg.sender → SourceBridge, amount)`  
-  - increments a `nonce` counter,
-  - emits event:
-
-    ```solidity
-    event Locked(
-        address indexed sender,
-        address indexed recipient,
-        uint256 amount,
-        uint256 indexed nonce
-    );
-    ```
-
-- The `nonce` value and event act as the **message** that a relayer will read.
-
-### 4. `WrappedTestToken.sol` (wATT)
-
-- Represents the **wrapped version of ATT** on the target side.
-- Standard ERC20 with:
-
-  ```solidity
-  function setBridge(address _bridge) external onlyOwner;
-  function mint(address to, uint256 amount) external onlyBridge;
-  ```
-
-- Only the configured bridge (TargetBridge) can mint `wATT`.
-
-### 5. `TargetBridge.sol`
-
-- Deployed on the **target side**.
-- Holds a reference to `WrappedTestToken`.
-- Provides:
-
-  ```solidity
-  function mintFromSource(
-      address recipient,
-      uint256 amount,
-      uint256 nonce
-  ) external onlyOwner;
-  ```
-
-- Maintains:
-
-  ```solidity
-  mapping(uint256 => bool) public processedNonces;
-  ```
-
-- Each `nonce` from `SourceBridge` can be used **exactly once**.  
-  If someone tries to mint again with the same `nonce`, the call reverts with:
-
-  > `Nonce already processed`
-
-- This is a basic form of **replay protection**, which becomes crucial for secure bridges.
+> **PQC integration (future):**  
+> In later versions, cross-chain messages (lock → mint, burn → unlock) would be attested by PQC-signed proofs from relayers / committees, and the bridge contracts would verify those attestations on-chain. The current PoC treats the relayer as trusted.
 
 ---
 
-## Scripts
+## Project Layout
 
-### `scripts/deploy.js`
+```txt
+contracts/
+  TestToken.sol           # ATT on source chain
+  WrappedTestToken.sol    # wATT on target chain
+  SourceBridge.sol        # Lock + unlock bridge on source
+  TargetBridge.sol        # Mint + burn bridge on target
 
-Deploys:
+scripts/
+  # Local (Hardhat node) PoC
+  demo_local_roundtrip.js       # Full local lock → mint → burn → unlock demo
+  deploy_local_for_relayer.js   # Deploy local contracts + save deployments/local_relayer.json
+  local_relayer.js              # (WIP) local relayer skeleton using local_relayer.json
 
-- `TestToken`
-- `AegisBridge` (single-chain prototype)
+  # Testnet deploy scripts (v0.2)
+  deploy_sepolia_source_v2.js   # Deploy ATT + SourceBridge v0.2 on Sepolia
+  deploy_amoy_target.js         # Deploy wATT + TargetBridge v0.2 on Amoy
 
-Useful as an introductory/demo setup.
+  # Testnet flow scripts
+  sepolia_lock.js               # Lock ATT on Sepolia (prints nonce)
+  amoy_mint_from_sepolia.js     # Mint wATT on Amoy using amount + nonce
 
-### `scripts/deploy_bridges_v2.js`
+  amoy_burn_to_sepolia.js       # Burn wATT on Amoy (emits BurnToSource event)
+  sepolia_unlock_from_amoy.js   # Unlock ATT on Sepolia based on burnNonce
 
-Deploys the **multi-side PoC**:
+  testnet_relayer.js            # (Optional) future relayer to automate events → tx
 
-1. `TestToken` (ATT)
-2. `WrappedTestToken` (wATT)
-3. `SourceBridge` (using ATT address)
-4. `TargetBridge` (using wATT address)
-5. Calls `wrappedToken.setBridge(TargetBridge)` so only `TargetBridge` can mint.
+deployments/
+  local_relayer.json            # Local deployment addresses for relayer/local tests
+  testnet_sepolia_amoy.json     # Testnet deployment addresses (Sepolia + Amoy)
+```
 
-This is the main entrypoint for the **Source/Target bridge model**.
+> **Note:** Old v0.1 testnet contracts (one-way Sepolia → Amoy) may still exist on-chain but are considered **legacy**.  
+> The current README describes the v0.2 flow and deployment addresses stored in `deployments/testnet_sepolia_amoy.json`.
+
+---
+
+## Prerequisites
+
+- Node.js (>= 18 recommended)
+- npm
+- Git
+- A funded EOA on:
+  - **Sepolia** (for gas + ATT operations)
+  - **Polygon Amoy** (for gas + wATT operations)
+
+You will also need valid RPC URLs for both testnets.
 
 ---
 
@@ -145,7 +106,46 @@ cd aegisbridge-poc
 npm install
 ```
 
-### 2. Run a local Hardhat node
+Compile contracts:
+
+```bash
+npx hardhat compile
+```
+
+---
+
+## Environment Configuration
+
+Create a `.env` file in the project root (do **not** commit this file):
+
+```bash
+SEPOLIA_RPC_URL="https://..."
+AMOY_RPC_URL="https://..."
+PRIVATE_KEY="0xYOUR_PRIVATE_KEY_WITH_FUNDS_ON_BOTH_TESTNETS"
+```
+
+- `PRIVATE_KEY` should be the **same EOA** used as deployer on both Sepolia & Amoy.
+- The same deployer is used by `hardhat.config.js` to send all testnet transactions.
+- This EOA will:
+  - Own initial ATT supply on Sepolia (depending on `TestToken` implementation)
+  - Own minted wATT on Amoy
+
+---
+
+## Local PoC – Full Roundtrip
+
+This section demonstrates the full **local** flow on a Hardhat node:
+
+- Mint initial ATT to the user (local default account)
+- Lock ATT on `SourceBridge` (local)
+- Mint wATT on `TargetBridge` (local)
+- Burn wATT on `TargetBridge` (local)
+- Unlock ATT on `SourceBridge` (local)
+- Enforce replay-protection using nonces
+
+### 1. Start local Hardhat node
+
+In one terminal:
 
 ```bash
 npx hardhat node
@@ -188,138 +188,404 @@ npx hardhat run scripts/demo_local_roundtrip.js --network localhost
 
 Expected output (example):
 
-```text
-TestToken (ATT) deployed to:      0x...
-WrappedTestToken (wATT) deployed to: 0x...
-SourceBridge deployed to:         0x...
-TargetBridge deployed to:         0x...
-WrappedTestToken.bridge set to TargetBridge
+```txt
+=== LOCAL ROUNDTRIP DEMO ===
+Network : localhost
+User    : 0xf39F...
+
+ATT          : 0x...
+SourceBridge : 0x...
+wATT         : 0x...
+TargetBridge : 0x...
+
+ATT user (awal)         : 1000000.0
+
+[LOCK]
+Lock nonce              : 1
+ATT user (setelah lock) : 999000.0
+ATT bridge (setelah lock): 1000.0
+
+[MINT DI TARGET]
+wATT user (setelah mint): 1000.0
+
+[BURN DI TARGET]
+wATT user (setelah burn): 600.0
+Burn nonce               : 1
+
+[UNLOCK DI SOURCE]
+processedBurnNonces before: false
+ATT user (sebelum unlock) : 999000.0
+ATT bridge (sebelum unlock): 1000.0
+ATT user (setelah unlock): 999400.0
+ATT bridge (setelah unlock): 600.0
+processedBurnNonces after : true
+
+=== DONE LOCAL ROUNDTRIP ===
 ```
 
-Copy these addresses for the next step.
+This confirms:
+
+- The source nonce increases with each `lock`.
+- The target chain tracks processed lock nonces (to prevent replay on mint).
+- The source chain can track processed burn nonces (to prevent replay on unlock).
+- Funds move correctly between user ↔ bridge contracts.
+
+> ⚠️ On Windows you may see:
+> `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\winsync.c, line 76`  
+> This is a known Node.js/Hardhat quirk on Windows. As long as the tx logs are correct, it is safe to ignore for this PoC.
 
 ---
 
-## Manual Demo: Lock → Mint on Localhost
+## Testnet PoC v0.2 – Full Roundtrip (Sepolia ↔ Amoy)
 
-### 1. Open Hardhat console
+The **v0.2** PoC supports a full two-way testnet flow:
+
+1. **Source chain:** Ethereum **Sepolia**
+2. **Target chain:** Polygon **Amoy**
+
+The flow:
+
+1. Lock ATT on Sepolia via `SourceBridge.lock(...)`
+2. Mint wATT on Amoy via `TargetBridge.mintFromSource(...)`
+3. Burn wATT on Amoy via `TargetBridge.burnToSource(...)`
+4. Unlock ATT on Sepolia via `SourceBridge.unlockFromTarget(...)`
+5. Protect both directions using **nonce-based replay protection**
+
+> 🔐 Currently, the relayer step is done manually via scripts.  
+> In a future iteration, a dedicated relayer process will listen to events on one chain and call the corresponding function on the other chain automatically.
+
+### 0. Current Example Deployments (from latest v0.2 run)
+
+These addresses are examples from a recent deployment and **will change if you redeploy**.  
+The canonical source of truth is always `deployments/testnet_sepolia_amoy.json`.
+
+```txt
+Sepolia (source v0.2)
+  ATT (TestToken)  : 0x0e61F6bCb0508684DA124e630898c21982FE94B1
+  SourceBridge     : 0x5719498Ffa5660fDcE95DEDC38C90F1f739Ca6a0
+
+Polygon Amoy (target v0.2)
+  wATT (Wrapped)   : 0x643Ce057E88Fb1E2813b596a30113CA7181C9e89
+  TargetBridge     : 0xf2825e24D3F12a41Ce4bb85B8F25306e34884c79
+```
+
+Your own deployments will likely differ. Always check `deployments/testnet_sepolia_amoy.json`.
+
+---
+
+### 1. Deploy Source v0.2 on Sepolia
 
 ```bash
-npx hardhat console --network localhost
+npx hardhat run scripts/deploy_sepolia_source_v2.js --network sepolia
 ```
 
-### 2. Attach to the contracts
+This script:
 
-Replace the `0x...` with the actual addresses from the deploy script.
+- Deploys `TestToken` (ATT) on Sepolia
+- Deploys `SourceBridge` linked to the new ATT
+- Updates the `"sepolia"` section inside `deployments/testnet_sepolia_amoy.json`
 
-```js
-const [deployer] = await ethers.getSigners();
-console.log("deployer:", deployer.address);
+Example output:
 
-const ATT_ADDRESS        = "0x..."; // TestToken
-const WATT_ADDRESS       = "0x..."; // WrappedTestToken
-const SRC_BRIDGE_ADDRESS = "0x..."; // SourceBridge
-const DST_BRIDGE_ADDRESS = "0x..."; // TargetBridge
-
-const att       = await ethers.getContractAt("TestToken",        ATT_ADDRESS);
-const wAtt      = await ethers.getContractAt("WrappedTestToken", WATT_ADDRESS);
-const srcBridge = await ethers.getContractAt("SourceBridge",     SRC_BRIDGE_ADDRESS);
-const dstBridge = await ethers.getContractAt("TargetBridge",     DST_BRIDGE_ADDRESS);
+```txt
+=== Deploying SOURCE contracts on sepolia ===
+Deployer       : 0x36b9...
+ATT (TestToken): 0x0e61F6...
+SourceBridge   : 0x571949...
+=================================
+Saved Sepolia deployments to: deployments/testnet_sepolia_amoy.json
 ```
 
-### 3. Check initial balances
-
-```js
-ethers.formatUnits(await att.balanceOf(deployer.address), 18);
-ethers.formatUnits(await wAtt.balanceOf(deployer.address), 18);
-```
-
-Expected:
-
-- ATT ≈ `1000000.0`
-- wATT = `0.0`
-
-### 4. Lock 1000 ATT in SourceBridge
-
-```js
-const amount = ethers.parseUnits("1000", 18);
-
-// Approve SourceBridge to take ATT
-await (await att.approve(SRC_BRIDGE_ADDRESS, amount)).wait();
-
-// Lock into SourceBridge
-await (await srcBridge.lock(amount, deployer.address)).wait();
-```
-
-Check:
-
-```js
-ethers.formatUnits(await att.balanceOf(deployer.address), 18);
-ethers.formatUnits(await att.balanceOf(SRC_BRIDGE_ADDRESS), 18);
-
-await srcBridge.nonce(); // should be 1n for the first lock
-```
-
-### 5. Mint 1000 wATT on the target side
-
-```js
-await (await dstBridge.mintFromSource(
-  deployer.address,
-  amount,
-  1 // nonce from SourceBridge
-)).wait();
-
-ethers.formatUnits(await wAtt.balanceOf(deployer.address), 18);
-```
-
-Trying to call `mintFromSource` again with the **same nonce (1)** will revert with  
-`Nonce already processed` → replay protection is working as intended.
+Depending on `TestToken` implementation, initial supply may be minted in the constructor.
 
 ---
 
-## Roadmap
+### 2. Deploy Target v0.2 on Amoy
 
-This repo is **Phase 0: Local PoC**. Planned evolution:
+```bash
+npx hardhat run scripts/deploy_amoy_target.js --network amoy
+```
 
-### Phase 1 – Testnets
+This script:
 
-- Deploy `SourceBridge` and `TargetBridge` to real testnets (e.g. Ethereum Sepolia & Polygon Amoy).
-- Implement a simple **off-chain relayer** that:
-  - listens to `Locked` events on the source chain,
-  - sends `mintFromSource` txs on the target chain.
+- Deploys `WrappedTestToken` (wATT) on Amoy
+- Deploys `TargetBridge` linked to the new wATT
+- Calls `wATT.setBridge(TargetBridge)` if available
+- Updates the `"amoy"` section inside `deployments/testnet_sepolia_amoy.json`
 
-### Phase 2 – Multi-Validator Bridge
+Example output:
 
-- Replace single `onlyOwner` with:
-  - a **validator set** (multiple signers),
-  - threshold/majority for message approval.
-- Define canonical message format:
+```txt
+=== Deploying TARGET contracts on amoy ===
+Deployer     : 0x36b9...
+wATT         : 0x643Ce0...
+TargetBridge : 0xf2825e...
+wATT.bridge set to TargetBridge
+================================
+Saved Amoy deployments to: deployments/testnet_sepolia_amoy.json
+```
 
-  ```text
-  hash(chainIdSource, chainIdTarget, token, recipient, amount, nonce, ...)
+---
+
+### 3. Lock ATT on Sepolia
+
+Script: `scripts/sepolia_lock.js`
+
+This script:
+
+- Reads ATT + SourceBridge addresses from `deployments/testnet_sepolia_amoy.json`
+- Approves SourceBridge to move ATT
+- Locks a fixed amount (e.g. 1000 ATT)
+- Prints the updated `nonce` on SourceBridge
+
+Run:
+
+```bash
+npx hardhat run scripts/sepolia_lock.js --network sepolia
+```
+
+Example output:
+
+```txt
+Network :  sepolia
+Deployer: 0x36b9...
+ATT before: 1000000.0
+Approve tx: 0x...
+Lock tx   : 0x...
+Locked in block: 9799665
+Current nonce on SourceBridge: 1
+ATT after (user): 999000.0
+ATT after (bridge): 1000.0
+
+➡️  Use this nonce on the Amoy side for mintFromSource: 1
+```
+
+Take note of:
+
+- `Current nonce on SourceBridge` → e.g. `1`
+- Locked `amount` → e.g. `1000`
+
+---
+
+### 4. Mint wATT on Amoy
+
+Script: `scripts/amoy_mint_from_sepolia.js`  
+
+This script:
+
+- Reads wATT + TargetBridge from `deployments/testnet_sepolia_amoy.json`
+- Mints wATT on Amoy using a given `AMOUNT` and `NONCE`
+- Skips minting if that nonce has already been processed
+
+Inside `amoy_mint_from_sepolia.js`, configure:
+
+```js
+const AMOUNT = "1000"; // must match the locked amount on Sepolia
+const NONCE  = 1;      // use the nonce printed by sepolia_lock.js
+```
+
+Then run:
+
+```bash
+npx hardhat run scripts/amoy_mint_from_sepolia.js --network amoy
+```
+
+Example output:
+
+```txt
+Network : amoy
+Deployer: 0x36b9...
+wATT before: 600.0
+Mint tx: 0x9aeb81...
+wATT after: 1600.0
+```
+
+If you run the same script again with the same `NONCE`, you should see:
+
+```txt
+Nonce 1 already processed on target. Skip mint.
+```
+
+This confirms that:
+
+- The one-way bridge **Sepolia → Amoy** is working for v0.2.
+- `TargetBridge` enforces **nonce-based replay protection** on lock → mint.
+
+---
+
+### 5. Burn wATT on Amoy
+
+Script: `scripts/amoy_burn_to_sepolia.js`  
+
+This script:
+
+- Reads wATT + TargetBridge from `deployments/testnet_sepolia_amoy.json`
+- Optionally ensures allowance (approve) for TargetBridge
+- Simulates `burnToSource` via `staticCall` to check for reverts
+- Sends a real `burnToSource(amount, targetUser)` transaction
+- Prints wATT balance before/after
+
+Key configuration (inside the script):
+
+```js
+const BURN_AMOUNT = process.env.BURN_AMOUNT || "400"; // wATT
+const TARGET_ON_SEPOLIA =
+  process.env.TARGET_ON_SEPOLIA || deployer;          // receiver on Sepolia
+```
+
+Run:
+
+```bash
+npx hardhat run scripts/amoy_burn_to_sepolia.js --network amoy
+```
+
+Example output:
+
+```txt
+=== Amoy burn → Sepolia unlock demo ===
+Network : amoy
+Deployer / holder wATT : 0x36b9...
+wATT         : 0x643Ce0...
+TargetBridge : 0xf2825e...
+wATT.bridge()           : 0xf2825e...
+TargetBridge (expected) : 0xf2825e...
+wATT balance before: 1600.0
+
+Simulating burnToSource(400 wATT → 0x36b9...) via staticCall...
+✅ staticCall burnToSource() SUCCESS (no revert).
+
+Burning 400 wATT on Amoy → unlock ATT to 0x36b9... on Sepolia...
+Burn tx sent: 0x4ec1cb...
+Burn confirmed in block: 30195279
+wATT balance after : 1200.0
+```
+
+At this point, the **BurnToSource** event exists on Amoy and can be used (by a relayer) to drive `unlockFromTarget` on Sepolia.
+
+---
+
+### 6. Unlock ATT on Sepolia
+
+Script: `scripts/sepolia_unlock_from_amoy.js`  
+
+This script:
+
+- Reads ATT + SourceBridge v0.2 from `deployments/testnet_sepolia_amoy.json`
+- Uses a configured `BURN_NONCE` and `UNLOCK_AMOUNT`
+- Simulates `unlockFromTarget` via `staticCall`
+- If simulation passes, sends a real `unlockFromTarget` transaction
+- Prints ATT balances before/after
+
+Configuration inside `sepolia_unlock_from_amoy.js`:
+
+```js
+const BURN_NONCE    = Number(process.env.BURN_NONCE || 1); // burn nonce from Amoy
+const UNLOCK_AMOUNT = process.env.UNLOCK_AMOUNT || "400";  // must match BURN_AMOUNT
+```
+
+Run:
+
+```bash
+npx hardhat run scripts/sepolia_unlock_from_amoy.js --network sepolia
+```
+
+Example output:
+
+```txt
+=== Sepolia unlockFromTarget demo ===
+Network : sepolia
+Deployer (receiver ATT) : 0x36b9...
+SourceBridge : 0x571949...
+ATT (TestToken): 0x0e61F6...
+
+Config:
+  BURN_NONCE    : 1
+  UNLOCK_AMOUNT : 400
+ATT user   (before): 999000.0
+ATT bridge (before): 1000.0
+
+Simulating unlockFromTarget(0x36b9..., 400, burnNonce=1) via staticCall...
+✅ staticCall unlockFromTarget() SUCCESS (no revert).
+
+Calling unlockFromTarget(0x36b9..., 400, burnNonce=1) on Sepolia...
+Unlock tx sent: 0x9cfd24...
+Unlock confirmed in block: 9799675
+ATT user   (after): 999400.0
+ATT bridge (after): 600.0
+
+=== DONE Sepolia unlockFromTarget ===
+```
+
+This confirms:
+
+- **v0.2 roundtrip is working on testnet**:
+  - Lock 1000 ATT → Mint 1000 wATT → Burn 400 wATT → Unlock 400 ATT
+- Nonce-based replay protection is enforced for both directions.
+
+---
+
+## Known Issues / Notes
+
+- On Windows, you may see assertions like:
+
+  ```txt
+  Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\winsync.c, line 76
   ```
 
-### Phase 3 – PQC-Aware Design
+  This is a Node.js/Hardhat/Windows interaction issue.  
+  As long as transactions are mined and logs look correct, it does not affect PoC behavior.
 
-- Integrate **Post-Quantum Cryptography (PQC)** at the relayer/validator layer:
-  - PQC signatures on bridge messages.
-  - Key rotation and upgrade paths.
-- Explore on-chain verification or zk-friendly proofs for PQC schemes (where feasible).
+- Some older scripts and contracts (v0.1) may still exist in the repository or on testnets.  
+  The **v0.2 flow described in this README** is the current reference.
 
-### Phase 4 – Production-Grade Architecture
-
-- Robust monitoring, slashing conditions, and economic security.
-- Standardization-oriented design to become a candidate **“Aegis” bridge security standard** for multi-chain ecosystems.
+- Test tokens (ATT, wATT) have **no real value** and should never be used in production.
 
 ---
 
-## Disclaimer
+## Roadmap (High-Level)
 
-This repository is:
+This repository is an early exploration of AegisBridge. Next logical steps:
 
-- for **education, experimentation, and R&D**,
-- not audited,
-- **not intended for mainnet** or production.
+1. **Automated Testnet Relayer**
+   - Long-running script that:
+     - Listens to `Locked` events on Sepolia
+     - Automatically calls `mintFromSource` on Amoy
+     - Listens to `BurnToSource` events on Amoy
+     - Automatically calls `unlockFromTarget` on Sepolia
+     - Tracks processed nonces and logs events
 
-Use at your own risk.  
-AegisBridge is still at an early design and prototyping stage.
+2. **Message Model & PQC-Aware Design**
+   - Define a canonical cross-chain message format, e.g.:
+
+     ```txt
+     { srcChainId, dstChainId, token, amount, user, nonce, direction, timestamp }
+     ```
+
+   - Plan how PQC signatures (e.g. Dilithium) could be used to attest these messages off-chain.
+   - Design how the bridge contracts would verify PQC-based attestations.
+
+3. **Multi-Token / Multi-Chain Support**
+   - Support multiple ERC-20 tokens
+   - Extend PoC to additional EVM chains / L2s
+   - Config-driven deployments and routing
+
+4. **Frontend Demo**
+   - Minimal dApp:
+     - Connect wallet on Sepolia & Amoy
+     - Lock ATT
+     - Show bridge status and resulting wATT balance on Amoy
+     - Show burn/unlock history and status
+
+5. **PQC R&D & Documentation**
+   - Conceptual documentation for integrating post-quantum signature schemes into the relayer layer
+   - A short whitepaper-style document outlining:
+     - Threat model (classical vs quantum)
+     - PQC algorithm choices
+     - Message formats and signature flows
+
+---
+
+## License
+
+This is research / PoC code.  
+Choose and add an appropriate license (e.g. MIT) before any production use.
