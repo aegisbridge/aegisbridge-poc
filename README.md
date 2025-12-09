@@ -1,27 +1,27 @@
 # AegisBridge – Testnet v0.3.1
 
-_AegisBridge_ adalah prototipe cross-chain bridge yang fokus ke **keamanan** dan **observability**.  
-Versi ini berjalan di **testnet**:
+_AegisBridge_ is a prototype cross-chain bridge focused on **security** and **observability**.  
+This version runs on **testnet** networks:
 
 - Ethereum **Sepolia**
 - Polygon **Amoy**
 
-Relayer off-chain akan memantau event di source chain dan mengeksekusi aksi di target chain (mint/burn/release).
+An off-chain relayer watches events on the source chain and executes actions on the target chain (mint/burn/release).
 
 ---
 
-## ✨ Status Versi v0.3.1
+## ✨ Version v0.3.1 Status
 
-Progress saat ini:
+Current progress:
 
-- ✅ Kontrak bridge & token testnet telah dideploy di Sepolia & Amoy  
-- ✅ Script relayer: `scripts/testnet_relayer.js`
-- ✅ Relayer sudah bisa:
-  - Membaca konfigurasi dari `.env`
-  - Konek ke Sepolia & Amoy via Alchemy RPC
-  - Menampilkan alamat deployer/relayer dan log dasar
+- ✅ Bridge & test token contracts deployed on Sepolia & Amoy  
+- ✅ Relayer script: `scripts/testnet_relayer.js`
+- ✅ Relayer can:
+  - Read configuration from `.env`
+  - Connect to Sepolia & Amoy via Alchemy RPC
+  - Print deployer/relayer address and basic logs
 
-Contoh output saat dijalankan:
+Example output when running:
 
 ```text
 [dotenv@17.2.3] injecting env (9) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
@@ -33,9 +33,9 @@ Contoh output saat dijalankan:
 
 ---
 
-## 📂 Struktur Project (ringkas)
+## 📂 Project Structure (overview)
 
-Struktur bisa kurang lebih seperti ini (sesuaikan dengan repo kamu):
+Your actual structure might differ, but typically looks like:
 
 ```bash
 aegisbridge/
@@ -57,20 +57,20 @@ aegisbridge/
 
 ---
 
-## 🛠 Prasyarat
+## 🛠 Requirements
 
 - Node.js **>= 18**
-- NPM atau Yarn
-- Akun Alchemy / RPC provider lain untuk:
+- NPM or Yarn
+- Alchemy account or another RPC provider for:
   - Sepolia
   - Polygon Amoy
-- Private key wallet untuk deployer/relayer (punya saldo testnet di kedua jaringan)
+- Wallet private key for deployer/relayer (with enough testnet funds on both networks)
 
 ---
 
-## ⚙️ Setup Project
+## ⚙️ Project Setup
 
-Clone / buka folder project:
+Open your project folder:
 
 ```bash
 cd aegisbridge
@@ -80,108 +80,108 @@ Install dependencies:
 
 ```bash
 npm install
-# atau
+# or
 yarn install
 ```
 
 ---
 
-## 🔐 Konfigurasi `.env`
+## 🔐 `.env` Configuration
 
-Buat file `.env` di root project (jangan di-commit).  
-Contoh isi (sesuaikan dengan data kamu):
+Create a `.env` file in the project root (do **not** commit this file).  
+Example content (adjust to your own values):
 
 ```env
 # RPC endpoints
 SEPOLIA_RPC_URL="https://eth-sepolia.g.alchemy.com/v2/XXXX"
 AMOY_RPC_URL="https://polygon-amoy.g.alchemy.com/v2/XXXX"
 
-# Private key deployer/relayer (tanpa spasi, tanpa tanda kutip 0x di depan kalau script kamu butuh format tertentu)
+# Deployer/relayer private key (no spaces)
 DEPLOYER_PRIVATE_KEY="0x...."
 
-# Alamat kontrak bridge & token di masing-masing chain
+# Bridge & token contract addresses on each chain
 BRIDGE_CONTRACT_SEPOLIA="0x..."
 BRIDGE_CONTRACT_AMOY="0x..."
 TEST_TOKEN_SEPOLIA="0x..."
 TEST_TOKEN_AMOY="0x..."
 
-# Pengaturan tambahan (kalau sudah dipakai di script)
+# Additional settings (if used in your scripts)
 RELAYER_POLL_INTERVAL_MS=5000
 NETWORK_ENV="testnet"
 ```
 
-> **Catatan:**  
-> - Jangan pernah commit `.env` ke Git.  
-> - Pastikan `.env` sudah masuk ke `.gitignore`.
+> **Notes:**  
+> - Never commit `.env` to Git.  
+> - Make sure `.env` is listed in `.gitignore`.
 
 ---
 
-## 🚀 Menjalankan Relayer Testnet
+## 🚀 Running the Testnet Relayer
 
-Pastikan `.env` sudah benar. Lalu jalankan:
+Once `.env` is configured correctly, run:
 
 ```bash
 node scripts/testnet_relayer.js
 ```
 
-Kalau sukses, kamu akan melihat:
+If everything is set up properly, you should see:
 
-- Banner versi `AegisBridge v0.3.1 Testnet Relayer`
-- URL RPC Sepolia & Amoy
-- Alamat deployer/relayer yang dipakai
-- Log tambahan saat relayer memantau event (akan diisi/diupdate lagi di versi berikutnya)
+- The `AegisBridge v0.3.1 Testnet Relayer` banner
+- Sepolia & Amoy RPC URLs
+- The deployer/relayer address in use
+- Additional logs as the relayer watches events (to be expanded in future versions)
 
-Biarkan proses ini berjalan di terminal selama kamu ingin bridge aktif.
+Keep this process running in your terminal as long as you want the bridge to be active.
 
 ---
 
-## 📦 Deploy Kontrak (opsional, untuk setup ulang)
+## 📦 (Optional) Deploying Contracts Again
 
-Jika butuh deploy ulang kontrak di testnet (nama script bisa berbeda, sesuaikan):
+If you need to redeploy contracts to testnets (script names may differ for your repo), you can use:
 
-### Deploy di Sepolia
+### Deploy to Sepolia
 
 ```bash
 npx hardhat run scripts/deploy_sepolia.js --network sepolia
 ```
 
-- Catat alamat kontrak bridge & token
-- Update di `.env`
+- Copy the new bridge & token contract addresses
+- Update them in `.env`
 
-### Deploy di Amoy
+### Deploy to Amoy
 
 ```bash
 npx hardhat run scripts/deploy_amoy.js --network amoy
 ```
 
-- Catat alamat kontrak bridge & token
-- Update di `.env` juga
+- Copy the new bridge & token contract addresses
+- Update `.env` accordingly
 
 ---
 
-## 🧭 Roadmap Dev (singkat)
+## 🧭 Dev Roadmap (short)
 
-Yang akan/masih dikerjakan dari versi ini:
+Planned work from this version:
 
-- [ ] Tambah logic baca event lock/burn di source chain
-- [ ] Eksekusi mint/release di target chain
-- [ ] Tambah nonce/idempotency supaya relayer tidak double eksekusi
-- [ ] Tambah batas minimal/maksimal amount per bridge
-- [ ] Integrasi ke Base (sebagai calon home chain token AegisBridge)
+- [ ] Add logic to read lock/burn events on the source chain
+- [ ] Execute mint/release on the target chain
+- [ ] Add nonce/idempotency to prevent double execution by the relayer
+- [ ] Add min/max amount limits per bridge
+- [ ] Integrate Base as the future home chain for the AegisBridge token
 
 ---
 
 ## ⚠️ Disclaimer
 
-Versi ini masih **PROTOTYPE TESTNET** dan hanya untuk riset & pengembangan.  
-Jangan gunakan dengan dana real / mainnet sebelum:
+This is a **TESTNET PROTOTYPE** for research & development purposes only.  
+Do not use it with real/mainnet funds before:
 
-- Kode direview
-- Kontrak diaudit
-- Arsitektur security dimatangkan
+- Code is reviewed
+- Contracts are audited
+- Security architecture is properly validated
 
 ---
 
-## 📜 Lisensi
+## 📜 License
 
-Lisensi default: **MIT** (bisa kamu ubah sewaktu-waktu sesuai kebutuhan).
+Default license: **MIT** (you can change it later if needed).
