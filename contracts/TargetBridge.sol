@@ -1,150 +1,123 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
 
-import "./WrappedTestToken.sol";
-import "./AegisMessage.sol";
+/// @dev Interface token wATT yang bisa di-mint dan di-burn.
+///      Pastikan token wATT di Amoy mengimplementasikan fungsi ini.
+interface IMintableBurnableERC20 is IERC20 {
+    function mint(address to, uint256 amount) external;
+    function burnFrom(address account, uint256 amount) external;
+}
 
-/// @title TargetBridge
-/// @notice Bridge di sisi chain tujuan (contoh: Polygon Amoy).
-///         - mint wATT ketika ada lock di source
-///         - burn wATT ketika user mau kembali ke source.
-contract TargetBridge is Ownable, Pausable {
-    using AegisMessage for AegisMessage.Message;
+/// @title AegisBridge Target (Amoy)
+/// @notice Mint wATT ketika ada lock di Sepolia,
+///         dan burn wATT + emit event ketika user minta return ke Sepolia.
+contract TargetBridge is Ownable {
+    /// @notice Token wrapped di Amoy (wATT)
+    IMintableBurnableERC20 public immutable wattToken;
 
-    /// @notice Token wrapped (wATT) di target chain.
-    WrappedTestToken public immutable wrapped;
+    /// @notice Relayer yang diizinkan memproses mint dari Sepolia
+    address public relayer;
 
-    /// @notice Nonce lock dari source yang sudah diproses → cegah replay mint.
+    /// @notice Nonce-from-Source (Sepolia -> Amoy) yang sudah diproses
+    ///         untuk mencegah double-mint
     mapping(uint256 => bool) public processedNonces;
 
-    /// @notice Nonce untuk setiap burn di target (dipakai di source untuk unlock).
-    uint256 public burnNonce;
+    /// @notice Nonce untuk arah Amoy -> Sepolia (reverse bridge)
+    uint256 public currentReturnNonce;
 
-    /// (Opsional) konfigurasi remote (source) untuk message model.
-    uint64 public dstChainId;
-    address public dstBridge;
-    address public dstToken; // token asli di source (mis. ATT di Sepolia)
-
-    /// Emitted ketika mint dilakukan berdasarkan lock di source.
+    /// @dev Event ketika relayer memproses mint dari Sepolia
     event MintedFromSource(
+        address indexed to,
+        uint256 amount,
+        uint256 indexed nonce
+    );
+
+    /// @dev Event ketika user minta kirim balik ke Sepolia
+    event ReturnRequested(
         address indexed user,
         uint256 amount,
         uint256 indexed nonce
     );
 
-    /// Emitted ketika user membakar wATT untuk kembali ke source.
-    event BurnToSource(
-        address indexed from,
-        address indexed to,
-        uint256 amount,
-        uint256 indexed burnNonce
-    );
+    /// @dev Event saat relayer diganti
+    event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
 
-    /// Emitted ketika canonical Aegis message hash terbentuk (BurnToUnlock).
-    event MessageHashEmitted(
-        bytes32 indexed msgHash,
-        AegisMessage.Direction direction,
-        uint256 indexed nonce
-    );
-
-    constructor(address _wrapped) Ownable(msg.sender) {
-        require(
-            _wrapped != address(0),
-            "Wrapped token address cannot be zero"
-        );
-        wrapped = WrappedTestToken(_wrapped);
+    modifier onlyRelayer() {
+        require(msg.sender == relayer, "AegisBridge: caller is not relayer");
+        _;
     }
 
-    // ============ Admin (owner) ============
+    /// @param _wattToken alamat wATT di Amoy
+    /// @param _relayer alamat relayer awal (biasanya deployer / EOA khusus)
+    constructor(address _wattToken, address _relayer)
+        Ownable(msg.sender)     // ⬅️ penting: set owner untuk Ownable v5
+    {
+        require(_wattToken != address(0), "AegisBridge: wattToken = zero");
+        require(_relayer != address(0), "AegisBridge: relayer = zero");
 
-    /// @notice Set konfigurasi remote (source) untuk message model.
-    /// @dev Opsional, hanya dipakai untuk AegisMessage hash.
-    function setRemote(
-        uint64 _dstChainId,
-        address _dstBridge,
-        address _dstToken
-    ) external onlyOwner {
-        dstChainId = _dstChainId;
-        dstBridge = _dstBridge;
-        dstToken = _dstToken;
+        wattToken = IMintableBurnableERC20(_wattToken);
+        relayer = _relayer;
     }
 
-    /// @notice Pause operasi state-changing (mint + burn).
-    function pause() external onlyOwner {
-        _pause();
+    /// @notice Ganti relayer yang diizinkan memanggil mintFromSource
+    function setRelayer(address _relayer) external onlyOwner {
+        require(_relayer != address(0), "AegisBridge: relayer = zero");
+        address old = relayer;
+        relayer = _relayer;
+        emit RelayerUpdated(old, _relayer);
     }
 
-    /// @notice Unpause operasi state-changing.
-    function unpause() external onlyOwner {
-        _unpause();
-    }
+    // -------------------------------------------------------------------------
+    // FORWARD DIRECTION: Sepolia -> Amoy
+    // -------------------------------------------------------------------------
 
-    // ============ Core bridge logic ============
-
-    /// @notice Dipanggil oleh relayer/owner setelah melihat event Locked di source.
-    /// @dev Satu `nonce` hanya boleh dipakai sekali di TargetBridge.
+    /// @notice Relayer memint wATT di Amoy berdasarkan lock di Sepolia.
+    /// @dev Dipanggil menggunakan data dari event Locked di SourceBridge (Sepolia).
+    /// @param to penerima wATT di Amoy
+    /// @param amount jumlah wATT yang akan di-mint
+    /// @param nonce nonce dari SourceBridge (currentNonce)
     function mintFromSource(
-        address user,
+        address to,
         uint256 amount,
         uint256 nonce
-    ) external onlyOwner whenNotPaused {
-        require(user != address(0), "User cannot be zero");
-        require(amount > 0, "Amount must be > 0");
-        require(!processedNonces[nonce], "Nonce already processed");
+    ) external onlyRelayer {
+        require(to != address(0), "AegisBridge: invalid recipient");
+        require(amount > 0, "AegisBridge: amount = 0");
+        require(!processedNonces[nonce], "AegisBridge: nonce already processed");
 
         processedNonces[nonce] = true;
 
-        // Mint wATT ke user. Hanya TargetBridge yang boleh mint di WrappedTestToken.
-        wrapped.mintTo(user, amount);
+        // Mint wATT ke user. Pastikan wattToken mengizinkan kontrak ini untuk mint.
+        wattToken.mint(to, amount);
 
-        emit MintedFromSource(user, amount, nonce);
-
-        // (Opsional) kalau mau, di sini juga bisa bentuk AegisMessage untuk LockToMint,
-        // tapi biasanya sisi source sudah cukup untuk canonical hash-nya.
+        emit MintedFromSource(to, amount, nonce);
     }
 
-    /// @notice Dipanggil user di target chain ketika ingin kembali ke source.
-    /// @dev Membakar wATT dari user dan emmit event BurnToSource.
-    function burnToSource(uint256 amount, address targetUser)
-        external
-        whenNotPaused
-    {
-        require(targetUser != address(0), "Target user cannot be zero");
-        require(amount > 0, "Amount must be > 0");
+    // -------------------------------------------------------------------------
+    // REVERSE DIRECTION: Amoy -> Sepolia
+    // -------------------------------------------------------------------------
 
-        // Burn wATT dari wallet caller (msg.sender).
-        // WrappedTestToken membatasi pemanggil ke bridge (TargetBridge),
-        // sehingga pattern-nya:
-        // - user approve TargetBridge
-        // - TargetBridge memanggil burnFromBridge(from, amount)
-        wrapped.burnFromBridge(msg.sender, amount);
+    /// @notice User di Amoy minta kirim balik ke Sepolia.
+    /// @dev User harus `approve` wATT ke kontrak bridge ini sebelum memanggil.
+    ///      Kontrak akan memanggil `burnFrom(msg.sender, amount)` pada wATT.
+    /// @param amount jumlah wATT yang akan di-burn dan direquest return-nya
+    function requestReturnToSource(uint256 amount) external {
+    require(amount > 0, "AegisBridge: amount = 0");
 
-        burnNonce += 1;
+    // Ambil wATT dari user ke kontrak bridge (escrow).
+    bool ok = wattToken.transferFrom(msg.sender, address(this), amount);
+    require(ok, "AegisBridge: transferFrom failed");
 
-        emit BurnToSource(msg.sender, targetUser, amount, burnNonce);
+    uint256 nonce = ++currentReturnNonce;
 
-        // Bentuk canonical Aegis message + hash (BurnToUnlock)
-        AegisMessage.Message memory m = AegisMessage.Message({
-            srcChainId: uint64(block.chainid),
-            dstChainId: dstChainId, // boleh 0 kalau belum dikonfigurasi
-            srcBridge: address(this),
-            dstBridge: dstBridge,
-            token: address(wrapped),
-            user: targetUser, // penerima di source chain
-            amount: amount,
-            nonce: burnNonce,
-            direction: AegisMessage.Direction.BurnToUnlock,
-            timestamp: uint64(block.timestamp)
-        });
+    emit ReturnRequested(msg.sender, amount, nonce);
+}
 
-        bytes32 msgHash = m.hash();
-        emit MessageHashEmitted(
-            msgHash,
-            AegisMessage.Direction.BurnToUnlock,
-            burnNonce
-        );
+    /// @notice Helper untuk mengecek apakah nonce forward sudah pernah dipakai.
+    function isNonceProcessed(uint256 nonce) external view returns (bool) {
+        return processedNonces[nonce];
     }
 }

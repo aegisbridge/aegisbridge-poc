@@ -1,62 +1,69 @@
+// scripts/sepolia_lock.js
 const hre = require("hardhat");
-const cfg = require("../deployments/testnet_sepolia_amoy.json");
 
 async function main() {
-  const { ethers, network } = hre;
-  const [deployer] = await ethers.getSigners();
+  const { ethers } = hre;
+  const [signer] = await ethers.getSigners();
 
-  if (network.name !== "sepolia") {
-    throw new Error("Run this with --network sepolia");
+  const tokenAddress = process.env.ATT_SEPOLIA;
+  const bridgeAddress = process.env.SOURCE_BRIDGE_SEPOLIA;
+  const rawAmount = process.env.AEGIS_LOCK_AMOUNT || "1000"; // 1000 ATT default
+
+  if (!tokenAddress || !bridgeAddress) {
+    console.error("❌ ATT_SEPOLIA atau SOURCE_BRIDGE_SEPOLIA belum di-set di .env");
+    process.exit(1);
   }
 
-  // UBAH ANGKA INI SESUAI KEBUTUHAN
-  const AMOUNT_TO_LOCK = "1000";
+  const erc20Abi = [
+    "function balanceOf(address) view returns (uint256)",
+    "function decimals() view returns (uint8)",
+    "function symbol() view returns (string)",
+    "function approve(address spender, uint256 amount) returns (bool)"
+  ];
 
-  const att = await ethers.getContractAt("TestToken", cfg.sepolia.ATT);
-  const srcBridge = await ethers.getContractAt(
-    "SourceBridge",
-    cfg.sepolia.SourceBridge
-  );
+  const token = await ethers.getContractAt(erc20Abi, tokenAddress);
+  const decimals = await token.decimals();
+  const symbol = await token.symbol();
 
-  const amount = ethers.parseUnits(AMOUNT_TO_LOCK, 18);
+  const parseUnits = ethers.parseUnits ?? ethers.utils.parseUnits;
+  const formatUnits = ethers.formatUnits ?? ethers.utils.formatUnits;
 
-  console.log("Network : ", network.name);
-  console.log("Deployer:", deployer.address);
-  console.log(
-    "ATT before:",
-    await ethers.formatUnits(await att.balanceOf(deployer.address), 18)
-  );
+  const amount = parseUnits(rawAmount, decimals);
 
-  const txApprove = await att.approve(cfg.sepolia.SourceBridge, amount);
-  await txApprove.wait();
-  console.log("Approve tx:", txApprove.hash);
+  const userBefore = await token.balanceOf(signer.address);
+  const bridgeBefore = await token.balanceOf(bridgeAddress);
 
-  const txLock = await srcBridge.lock(amount, deployer.address);
-  const receipt = await txLock.wait();
-  console.log("Lock tx   :", txLock.hash);
+  console.log("Network : ", hre.network.name);
+  console.log("Deployer:", signer.address);
+  console.log(`${symbol} before:`, formatUnits(userBefore, decimals));
+  console.log(`${symbol} bridge before:`, formatUnits(bridgeBefore, decimals));
+
+  // 1) Approve ATT ke SourceBridge v2
+  const approveTx = await token.approve(bridgeAddress, amount);
+  console.log("Approve tx:", approveTx.hash);
+  await approveTx.wait();
+
+  // 2) Panggil lock(amount) di SourceBridge v2 (SATU ARGUMEN)
+  const SourceBridge = await ethers.getContractFactory("SourceBridge");
+  const bridge = SourceBridge.attach(bridgeAddress);
+
+  const lockTx = await bridge.lock(amount);
+  console.log("Lock tx   :", lockTx.hash);
+  const receipt = await lockTx.wait();
   console.log("Locked in block:", receipt.blockNumber);
 
-  const nonce = await srcBridge.nonce();
-  console.log("Current nonce on SourceBridge:", nonce.toString());
+  const currentNonce = await bridge.currentNonce();
 
-  console.log(
-    "ATT after (user):",
-    await ethers.formatUnits(await att.balanceOf(deployer.address), 18)
-  );
-  console.log(
-    "ATT after (bridge):",
-    await ethers.formatUnits(
-      await att.balanceOf(cfg.sepolia.SourceBridge),
-      18
-    )
-  );
+  const userAfter = await token.balanceOf(signer.address);
+  const bridgeAfter = await token.balanceOf(bridgeAddress);
 
-  console.log(
-    `\n➡️  Gunakan nonce ini di sisi Amoy untuk mintFromSource: ${nonce.toString()}`
-  );
+  console.log(`${symbol} after (user)  :`, formatUnits(userAfter, decimals));
+  console.log(`${symbol} after (bridge):`, formatUnits(bridgeAfter, decimals));
+  console.log("");
+  console.log("➡️  Current nonce on SourceBridge v2:", currentNonce.toString());
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
 });

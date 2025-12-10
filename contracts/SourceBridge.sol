@@ -3,144 +3,106 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
 
-import "./AegisMessage.sol";
+/// @title AegisBridge Source (Sepolia)
+/// @notice Menjaga ATT yang di-lock saat bridging ke Amoy,
+///         dan me–release kembali ATT saat ada return dari Amoy.
+contract SourceBridge is Ownable {
+    /// @notice Token canonical di Sepolia (ATT)
+    IERC20 public immutable attToken;
 
-/// @title SourceBridge
-/// @notice Bridge di sisi chain asal (contoh: Sepolia):
-///         - lock token ketika user mau pindah ke chain tujuan
-///         - unlock token ketika ada burn di chain tujuan.
-contract SourceBridge is Ownable, Pausable {
-    using AegisMessage for AegisMessage.Message;
+    /// @notice Relayer yang diizinkan memproses mint/release
+    address public relayer;
 
-    /// @notice Token asli (ATT) di source chain.
-    IERC20 public immutable token;
+    /// @notice Nonce forward untuk arah Sepolia -> Amoy (lock)
+    uint256 public currentNonce;
 
-    /// @notice Nonce unik untuk setiap lock di source.
-    uint256 public nonce;
+    /// @notice Nonce reverse (Amoy -> Sepolia) yang sudah diproses
+    ///         untuk mencegah double-release
+    mapping(uint256 => bool) public processedReturnNonces;
 
-    /// @notice Burn nonce dari chain tujuan yang sudah diproses → cegah replay unlock.
-    mapping(uint256 => bool) public processedBurnNonces;
+    /// @dev Event saat user mengunci ATT di Sepolia
+    event Locked(address indexed user, uint256 amount, uint256 indexed nonce);
 
-    /// @notice (Opsional) konfigurasi remote bridge (tujuan).
-    ///         Tidak wajib di-set untuk PoC; default 0 berarti belum dikonfigurasi.
-    uint64 public dstChainId;
-    address public dstBridge;
-    address public dstToken; // token representasi di chain tujuan (mis. wATT)
-
-    /// Emitted ketika user mengunci token di source.
-    event Locked(
-        address indexed sender,
-        address indexed recipient,
+    /// @dev Event saat ATT dilepas kembali ke user dari pool bridge (reverse)
+    event ReleasedFromTarget(
+        address indexed user,
         uint256 amount,
         uint256 indexed nonce
     );
 
-    /// Emitted ketika token dibuka kembali setelah burn di target.
-    event UnlockedFromTarget(
-        address indexed recipient,
+    /// @dev Event saat relayer diganti
+    event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
+
+    modifier onlyRelayer() {
+        require(msg.sender == relayer, "AegisBridge: caller is not relayer");
+        _;
+    }
+
+    /// @param _attToken alamat token ATT di Sepolia
+    /// @param _relayer alamat relayer awal (biasanya deployer / EOA khusus)
+    constructor(address _attToken, address _relayer)
+        Ownable(msg.sender)     // ⬅️ penting: set owner untuk Ownable v5
+    {
+        require(_attToken != address(0), "AegisBridge: attToken = zero");
+        require(_relayer != address(0), "AegisBridge: relayer = zero");
+
+        attToken = IERC20(_attToken);
+        relayer = _relayer;
+    }
+
+    /// @notice Ganti relayer yang diizinkan memanggil fungsi relayer-only
+    function setRelayer(address _relayer) external onlyOwner {
+        require(_relayer != address(0), "AegisBridge: relayer = zero");
+        address old = relayer;
+        relayer = _relayer;
+        emit RelayerUpdated(old, _relayer);
+    }
+
+    /// @notice User mengunci ATT di Sepolia untuk di–bridge ke Amoy.
+    /// @dev User harus sudah `approve` ATT ke kontrak ini sebelum memanggil.
+    /// @param amount jumlah ATT (dalam satuan token, bukan wei mentah)
+    /// @return nonce nilai nonce terbaru sesudah lock
+    function lock(uint256 amount) external returns (uint256 nonce) {
+        require(amount > 0, "AegisBridge: amount = 0");
+
+        // Tarik ATT dari user ke kontrak bridge
+        bool ok = attToken.transferFrom(msg.sender, address(this), amount);
+        require(ok, "AegisBridge: transferFrom failed");
+
+        // Update nonce dan emit event
+        nonce = ++currentNonce;
+
+        emit Locked(msg.sender, amount, nonce);
+    }
+
+    /// @notice Relayer me–release ATT ke user berdasarkan request dari Amoy.
+    /// @dev Hanya bisa dipanggil relayer, menggunakan data dari event ReturnRequested di Amoy.
+    /// @param to penerima di Sepolia (biasanya address yang sama dengan di Amoy)
+    /// @param amount jumlah ATT yang akan dikembalikan
+    /// @param nonce return nonce dari Amoy (currentReturnNonce)
+    function releaseFromTarget(
+        address to,
         uint256 amount,
-        uint256 indexed burnNonce
-    );
-
-    /// Emitted ketika message hash canonical AegisBridge terbentuk.
-    /// Digunakan untuk future PQC-aware relayers.
-    event MessageHashEmitted(
-        bytes32 indexed msgHash,
-        AegisMessage.Direction direction,
-        uint256 indexed nonce
-    );
-
-    constructor(address _token) Ownable(msg.sender) {
-        require(_token != address(0), "Token address cannot be zero");
-        token = IERC20(_token);
-    }
-
-    // ============ Admin (owner) ============
-
-    /// @notice Set konfigurasi remote (tujuan) untuk message model.
-    /// @dev Opsional, hanya dipakai untuk AegisMessage hash (tidak mempengaruhi logika lock/unlock).
-    function setDestination(
-        uint64 _dstChainId,
-        address _dstBridge,
-        address _dstToken
-    ) external onlyOwner {
-        dstChainId = _dstChainId;
-        dstBridge = _dstBridge;
-        dstToken = _dstToken;
-    }
-
-    /// @notice Pause seluruh operasi state-changing (lock + unlockFromTarget).
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /// @notice Unpause seluruh operasi state-changing.
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    // ============ Core bridge logic ============
-
-    /// @notice User mengunci token di sisi asal.
-    /// @dev Event `Locked` ini yang akan dibaca relayer.
-    function lock(uint256 amount, address recipient) external whenNotPaused {
-        require(amount > 0, "Amount must be > 0");
-        require(recipient != address(0), "Recipient cannot be zero");
-
-        bool ok = token.transferFrom(msg.sender, address(this), amount);
-        require(ok, "Token transfer failed");
-
-        nonce += 1;
-
-        emit Locked(msg.sender, recipient, amount, nonce);
-
-        // Bentuk canonical Aegis message + hash (LockToMint)
-        AegisMessage.Message memory m = AegisMessage.Message({
-            srcChainId: uint64(block.chainid),
-            dstChainId: dstChainId, // boleh 0 jika belum dikonfigurasi
-            srcBridge: address(this),
-            dstBridge: dstBridge,
-            token: address(token),
-            user: recipient, // penerima di chain tujuan
-            amount: amount,
-            nonce: nonce,
-            direction: AegisMessage.Direction.LockToMint,
-            timestamp: uint64(block.timestamp)
-        });
-
-        bytes32 msgHash = m.hash();
-        emit MessageHashEmitted(
-            msgHash,
-            AegisMessage.Direction.LockToMint,
-            nonce
-        );
-    }
-
-    /// @notice Dipanggil relayer/owner setelah melihat event BurnToSource di chain tujuan.
-    /// @dev Satu `burnNonce` hanya boleh dipakai sekali.
-    function unlockFromTarget(
-        address recipient,
-        uint256 amount,
-        uint256 burnNonce
-    ) external onlyOwner whenNotPaused {
-        require(recipient != address(0), "Recipient cannot be zero");
-        require(amount > 0, "Amount must be > 0");
+        uint256 nonce
+    ) external onlyRelayer {
+        require(to != address(0), "AegisBridge: invalid recipient");
+        require(amount > 0, "AegisBridge: amount = 0");
         require(
-            !processedBurnNonces[burnNonce],
-            "Burn nonce already processed"
+            !processedReturnNonces[nonce],
+            "AegisBridge: return nonce already processed"
         );
 
-        processedBurnNonces[burnNonce] = true;
+        processedReturnNonces[nonce] = true;
 
-        bool ok = token.transfer(recipient, amount);
-        require(ok, "Token transfer failed");
+        bool ok = attToken.transfer(to, amount);
+        require(ok, "AegisBridge: transfer failed");
 
-        emit UnlockedFromTarget(recipient, amount, burnNonce);
+        emit ReleasedFromTarget(to, amount, nonce);
+    }
 
-        // (Opsional) bisa juga bentuk AegisMessage di sini untuk BurnToUnlock,
-        // tetapi di desain v0.2, canonical hash utama untuk arah ini
-        // diekspose dari sisi target (TargetBridge.burnToSource).
+    /// @notice Helper untuk melihat saldo ATT yang sedang "terkunci" di bridge.
+    function lockedLiquidity() external view returns (uint256) {
+        return attToken.balanceOf(address(this));
     }
 }
