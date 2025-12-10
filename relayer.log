@@ -739,3 +739,136 @@
 [2025-12-09T14:07:12.724Z] [TX] unlockFromTarget(burnNonce=10) sent: 0x2dcf5cc19d219542f9fe4962ec3033d925ffcc0ca8a0002beb1379d4d965d2dc
 [2025-12-09T14:07:25.582Z] [TX] unlockFromTarget(burnNonce=10) confirmed in block 9803375 (status=1)
 [2025-12-09T14:07:25.584Z] [UNLOCK] unlockFromTarget successful for burnNonce=10, tx=undefined
+[2025-12-09T23:26:56.762Z] [ABI] Loaded ABI for SourceBridge from artifacts/contracts/SourceBridge.sol/SourceBridge.json
+[2025-12-09T23:26:56.791Z] [ABI] Loaded ABI for TargetBridge from artifacts/contracts/TargetBridge.sol/TargetBridge.json
+[2025-12-09T23:26:58.001Z] === AegisBridge v0.4.2 Testnet Relayer ===
+[2025-12-09T23:26:58.002Z] Env           : testnet
+[2025-12-09T23:26:58.003Z] Sepolia RPC   : https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T23:26:58.003Z] Amoy RPC      : https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T23:26:58.004Z] Relayer addr  : 0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+[2025-12-09T23:26:58.005Z] 
+[2025-12-09T23:26:58.005Z] Sepolia chainId : 11155111
+[2025-12-09T23:26:58.006Z] Amoy chainId    : 80002
+[2025-12-09T23:26:58.006Z] 
+[2025-12-09T23:26:58.007Z] SourceBridge (Sepolia): 0x4Fb169EDA4C92de96634595d36571637CFbb4437
+[2025-12-09T23:26:58.008Z] ATT (Sepolia)          : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+[2025-12-09T23:26:58.008Z] TargetBridge (Amoy)    : 0xA9E3bf15148EA340e76B851483486ca546eD8018
+[2025-12-09T23:26:58.008Z] wATT (Amoy)            : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+[2025-12-09T23:26:58.009Z] ========================================
+[2025-12-09T23:26:58.009Z] [CONFIG] DRY_RUN=false, MAX_RETRIES=3, RETRY_DELAY_MS=10000
+[2025-12-09T23:26:58.010Z] [CONFIG] DISABLE_SYNC=true, FROM_BLOCK_SEPOLIA=9800900, FROM_BLOCK_AMOY=30205500
+[2025-12-09T23:26:58.011Z] [CONFIG] MINT_GAS_LIMIT=300000, UNLOCK_GAS_LIMIT=300000
+[2025-12-09T23:26:58.013Z] [STATE] Loaded relayer_state.json with 1 lock nonces and 1 burn nonces.
+[2025-12-09T23:26:58.014Z] [HEALTH] HTTP port=8081, interval=5000 ms
+
+[2025-12-09T23:26:58.014Z] [SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.
+[2025-12-09T23:26:58.030Z] Subscribing to live events...
+[2025-12-09T23:26:58.031Z] - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy
+[2025-12-09T23:26:58.032Z] - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
+[2025-12-09T23:26:58.033Z] 
+[2025-12-09T23:26:58.034Z] Press Ctrl+C to exit.
+
+[2025-12-09T23:26:58.040Z] [HEALTH] HTTP health endpoint listening on port 8081
+[2025-12-09T23:42:00.768Z] 
+[LOCK EVENT] Sepolia Locked → nonce=11, amount=1000.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0x3861530bcf013cb490ad34072aeee07c8f41605f409da8a65149b1370e105800
+[2025-12-09T23:42:01.151Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=1000.0, nonce=11, gasLimit=300000
+[2025-12-09T23:42:01.153Z] [TX] mintFromSource(nonce=11) — attempt 1/3
+[2025-12-09T23:42:03.060Z] [TX] mintFromSource(nonce=11) sent: 0x02b4a2ce1abb7c33aff086a9acf9553732d693d3033608b920d1285f920ff065
+[2025-12-09T23:42:05.956Z] [TX] mintFromSource(nonce=11) confirmed in block 30249050 (status=1)
+[2025-12-09T23:42:05.957Z] [MINT] mintFromSource successful for nonce=11, tx=undefined
+[2025-12-09T23:56:40.341Z] [ABI] Loaded ABI for SourceBridge from artifacts/contracts/SourceBridge.sol/SourceBridge.json
+[2025-12-09T23:56:40.359Z] [ABI] Loaded ABI for TargetBridge from artifacts/contracts/TargetBridge.sol/TargetBridge.json
+[2025-12-09T23:56:41.228Z] === AegisBridge v0.4.2 Testnet Relayer ===
+[2025-12-09T23:56:41.228Z] Env           : testnet
+[2025-12-09T23:56:41.229Z] Sepolia RPC   : https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T23:56:41.230Z] Amoy RPC      : https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-09T23:56:41.231Z] Relayer addr  : 0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+[2025-12-09T23:56:41.232Z] 
+[2025-12-09T23:56:41.233Z] Sepolia chainId : 11155111
+[2025-12-09T23:56:41.233Z] Amoy chainId    : 80002
+[2025-12-09T23:56:41.234Z] 
+[2025-12-09T23:56:41.235Z] SourceBridge (Sepolia): 0x4Fb169EDA4C92de96634595d36571637CFbb4437
+[2025-12-09T23:56:41.236Z] ATT (Sepolia)          : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+[2025-12-09T23:56:41.236Z] TargetBridge (Amoy)    : 0xA9E3bf15148EA340e76B851483486ca546eD8018
+[2025-12-09T23:56:41.237Z] wATT (Amoy)            : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+[2025-12-09T23:56:41.238Z] ========================================
+[2025-12-09T23:56:41.239Z] [CONFIG] DRY_RUN=false, MAX_RETRIES=3, RETRY_DELAY_MS=10000
+[2025-12-09T23:56:41.240Z] [CONFIG] DISABLE_SYNC=true, FROM_BLOCK_SEPOLIA=9800900, FROM_BLOCK_AMOY=30205500
+[2025-12-09T23:56:41.241Z] [CONFIG] MINT_GAS_LIMIT=300000, UNLOCK_GAS_LIMIT=300000
+[2025-12-09T23:56:41.242Z] [STATE] Loaded relayer_state.json with 2 lock nonces and 1 burn nonces.
+[2025-12-09T23:56:41.243Z] [HEALTH] HTTP port=8081, interval=5000 ms
+
+[2025-12-09T23:56:41.244Z] [SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.
+[2025-12-09T23:56:41.251Z] Subscribing to live events...
+[2025-12-09T23:56:41.252Z] - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy
+[2025-12-09T23:56:41.254Z] - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
+[2025-12-09T23:56:41.255Z] 
+[2025-12-09T23:56:41.256Z] Press Ctrl+C to exit.
+
+[2025-12-09T23:56:41.262Z] [HEALTH] Server error: listen EADDRINUSE: address already in use :::8081
+[2025-12-10T00:11:40.782Z] [ABI] Loaded ABI for SourceBridge from artifacts/contracts/SourceBridge.sol/SourceBridge.json
+[2025-12-10T00:11:40.785Z] [ABI] Loaded ABI for TargetBridge from artifacts/contracts/TargetBridge.sol/TargetBridge.json
+[2025-12-10T00:11:41.715Z] === AegisBridge v0.4.2 Testnet Relayer ===
+[2025-12-10T00:11:41.716Z] Env           : testnet
+[2025-12-10T00:11:41.717Z] Sepolia RPC   : https://eth-sepolia.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-10T00:11:41.718Z] Amoy RPC      : https://polygon-amoy.g.alchemy.com/v2/_-xTQNx5Gnu3G06RLUFq0
+[2025-12-10T00:11:41.719Z] Relayer addr  : 0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+[2025-12-10T00:11:41.719Z] 
+[2025-12-10T00:11:41.721Z] Sepolia chainId : 11155111
+[2025-12-10T00:11:41.722Z] Amoy chainId    : 80002
+[2025-12-10T00:11:41.722Z] 
+[2025-12-10T00:11:41.723Z] SourceBridge (Sepolia): 0x4Fb169EDA4C92de96634595d36571637CFbb4437
+[2025-12-10T00:11:41.724Z] ATT (Sepolia)          : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+[2025-12-10T00:11:41.725Z] TargetBridge (Amoy)    : 0xA9E3bf15148EA340e76B851483486ca546eD8018
+[2025-12-10T00:11:41.726Z] wATT (Amoy)            : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+[2025-12-10T00:11:41.727Z] ========================================
+[2025-12-10T00:11:41.727Z] [CONFIG] DRY_RUN=false, MAX_RETRIES=3, RETRY_DELAY_MS=10000
+[2025-12-10T00:11:41.728Z] [CONFIG] DISABLE_SYNC=true, FROM_BLOCK_SEPOLIA=9800900, FROM_BLOCK_AMOY=30205500
+[2025-12-10T00:11:41.729Z] [CONFIG] MINT_GAS_LIMIT=300000, UNLOCK_GAS_LIMIT=300000
+[2025-12-10T00:11:41.730Z] [STATE] Loaded relayer_state.json with 2 lock nonces and 1 burn nonces.
+[2025-12-10T00:11:41.731Z] [HEALTH] HTTP port=8081, interval=5000 ms
+
+[2025-12-10T00:11:41.732Z] [SYNC] Initial sync is DISABLED by RELAYER_DISABLE_SYNC=true.
+[2025-12-10T00:11:41.737Z] Subscribing to live events...
+[2025-12-10T00:11:41.738Z] - Locked(user, recipient, amount, nonce) on SourceBridge (Sepolia) → mintFromSource on Amoy
+[2025-12-10T00:11:41.739Z] - BurnToSource(from, to, amount, burnNonce) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
+[2025-12-10T00:11:41.740Z] 
+[2025-12-10T00:11:41.741Z] Press Ctrl+C to exit.
+
+[2025-12-10T00:11:41.749Z] [HEALTH] Server error: listen EADDRINUSE: address already in use :::8081
+[2025-12-10T00:12:26.213Z] 
+[LOCK EVENT] Sepolia Locked → nonce=12, amount=1000.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0x01ccbeb75402dc77c244b23113f2d5728e8f788948587c55154f5755bfd41658
+[2025-12-10T00:12:26.336Z] 
+[LOCK EVENT] Sepolia Locked → nonce=12, amount=1000.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0x01ccbeb75402dc77c244b23113f2d5728e8f788948587c55154f5755bfd41658
+[2025-12-10T00:12:26.594Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=1000.0, nonce=12, gasLimit=300000
+[2025-12-10T00:12:26.596Z] [TX] mintFromSource(nonce=12) — attempt 1/3
+[2025-12-10T00:12:26.709Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=1000.0, nonce=12, gasLimit=300000
+[2025-12-10T00:12:26.711Z] [TX] mintFromSource(nonce=12) — attempt 1/3
+[2025-12-10T00:12:27.331Z] 
+[LOCK EVENT] Sepolia Locked → nonce=12, amount=1000.0, sender=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, recipient=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, tx=0x01ccbeb75402dc77c244b23113f2d5728e8f788948587c55154f5755bfd41658
+[2025-12-10T00:12:27.711Z] [MINT] Preparing mintFromSource on Amoy: user=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a, amount=1000.0, nonce=12, gasLimit=300000
+[2025-12-10T00:12:27.713Z] [TX] mintFromSource(nonce=12) — attempt 1/3
+[2025-12-10T00:12:28.494Z] [TX] mintFromSource(nonce=12) sent: 0x34b539dbf501c99b0161a334b877fa4f9d48926b3d980a531a042fa164200b5c
+[2025-12-10T00:12:28.549Z] [TX-ERROR] mintFromSource(nonce=12) failed on attempt 1/3: could not coalesce error
+[2025-12-10T00:12:28.550Z] [TX] Waiting 10000 ms before retry (label=mintFromSource(nonce=12))...
+[2025-12-10T00:12:29.634Z] [TX-ERROR] mintFromSource(nonce=12) failed on attempt 1/3: could not coalesce error
+[2025-12-10T00:12:29.635Z] [TX] Waiting 10000 ms before retry (label=mintFromSource(nonce=12))...
+[2025-12-10T00:12:32.139Z] [TX] mintFromSource(nonce=12) confirmed in block 30250267 (status=1)
+[2025-12-10T00:12:32.140Z] [MINT] mintFromSource successful for nonce=12, tx=undefined
+[2025-12-10T00:12:38.559Z] [TX] mintFromSource(nonce=12) — attempt 2/3
+[2025-12-10T00:12:39.639Z] [TX] mintFromSource(nonce=12) — attempt 2/3
+[2025-12-10T00:12:40.438Z] [TX] mintFromSource(nonce=12) sent: 0xf7f50ff05e759b976245524d6249abf787a0877baf415033a70f30f8d09143f2
+[2025-12-10T00:12:41.501Z] [TX-ERROR] mintFromSource(nonce=12) failed on attempt 2/3: could not coalesce error
+[2025-12-10T00:12:41.503Z] [TX] Waiting 10000 ms before retry (label=mintFromSource(nonce=12))...
+[2025-12-10T00:12:43.157Z] [TX-ERROR] mintFromSource(nonce=12) failed on attempt 2/3: transaction execution reverted
+[2025-12-10T00:12:43.158Z] [TX] Waiting 10000 ms before retry (label=mintFromSource(nonce=12))...
+[2025-12-10T00:12:51.508Z] [TX] mintFromSource(nonce=12) — attempt 3/3
+[2025-12-10T00:12:53.159Z] [TX] mintFromSource(nonce=12) — attempt 3/3
+[2025-12-10T00:12:53.648Z] [TX] mintFromSource(nonce=12) sent: 0x7248d457fb5d6c7c3a870aa89252e90a6f5cb5aeeed7fe4c85433dcca3908980
+[2025-12-10T00:12:55.018Z] [TX] mintFromSource(nonce=12) sent: 0x44d40f87c703713ac2ee872d3fee77f11ce657ce29849e7fbad03cf63c4aa283
+[2025-12-10T00:12:57.757Z] [TX-ERROR] mintFromSource(nonce=12) failed on attempt 3/3: transaction execution reverted
+[2025-12-10T00:12:57.759Z] [TX-ERROR] mintFromSource(nonce=12) giving up after 3 attempts.
+[2025-12-10T00:12:57.760Z] [TX-ERROR-DETAIL] Error: transaction execution reverted (action="sendTransaction", data=null, reason=null, invocation=null, revert=null, transaction={ "data": "", "from": "0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a", "to": "0xA9E3bf15148EA340e76B851483486ca546eD8018" }, receipt={ "_type": "TransactionReceipt", "blobGasPrice": null, "blobGasUsed": null, "blockHash": "0x4fa5dff10c13f65bb71fab07824690e2fd9c11759d13c8dffa8e5f239c1b91e4", "blockNumber": 30250285, "contractAddress": null, "cumulativeGasUsed": "27710", "from": "0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a", "gasPrice": "50000000063", "gasUsed": "27710", "hash": "0x44d40f87c703713ac2ee872d3fee77f11ce657ce29849e7fbad03cf63c4aa283", "index": 0, "logs": [ { "_type": "log", "address": "0x0000000000000000000000000000000000001010", "blockHash": "0x4fa5dff10c13f65bb71fab07824690e2fd9c11759d13c8dffa8e5f239c1b91e4", "blockNumber": 30250285, "data": "0x0000000000000000000000000000000000000000000000000004ec1adb56180000000000000000000000000000000000000000000000000000a9f9d4eb297a360000000000000000000000000000000000000000000012030078bcab183e0f2900000000000000000000000000000000000000000000000000a50dba0fd36236000000000000000000000000000000000000000000001203007da8c5f3942729", "index": 0, "removed": null, "topics": [ "0x4dfe1bbbcf077ddc3e01291eea2d5c70c2b422b415d95645b9adcfd678cb1d63", "0x0000000000000000000000000000000000000000000000000000000000001010", "0x00000000000000000000000036b95469dd6ea8d1e17c6bc65513e8c9f53ec50a", "0x0000000000000000000000007ee41d8a25641000661b1ef5e6ae8a00400466b0" ], "transactionHash": "0x44d40f87c703713ac2ee872d3fee77f11ce657ce29849e7fbad03cf63c4aa283", "transactionIndex": 0 } ], "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000040000000000000000000000800000000000000000000100000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000020000000400000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000004000000000000000000001000000000000020000400000000000100000000000000000000000000000000000000000000000000000000200000000000000100000", "root": null, "status": 0, "to": "0xA9E3bf15148EA340e76B851483486ca546eD8018" }, code=CALL_EXCEPTION, version=6.16.0)
+[2025-12-10T00:12:59.160Z] [TX-ERROR] mintFromSource(nonce=12) failed on attempt 3/3: transaction execution reverted
+[2025-12-10T00:12:59.161Z] [TX-ERROR] mintFromSource(nonce=12) giving up after 3 attempts.
+[2025-12-10T00:12:59.162Z] [TX-ERROR-DETAIL] Error: transaction execution reverted (action="sendTransaction", data=null, reason=null, invocation=null, revert=null, transaction={ "data": "", "from": "0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a", "to": "0xA9E3bf15148EA340e76B851483486ca546eD8018" }, receipt={ "_type": "TransactionReceipt", "blobGasPrice": null, "blobGasUsed": null, "blockHash": "0x61c7b72906982691bcdac41d8f19e7e08dae5244534e4b94d7be34ea004f6adb", "blockNumber": 30250284, "contractAddress": null, "cumulativeGasUsed": "27710", "from": "0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a", "gasPrice": "50000000063", "gasUsed": "27710", "hash": "0x7248d457fb5d6c7c3a870aa89252e90a6f5cb5aeeed7fe4c85433dcca3908980", "index": 0, "logs": [ { "_type": "log", "address": "0x0000000000000000000000000000000000001010", "blockHash": "0x61c7b72906982691bcdac41d8f19e7e08dae5244534e4b94d7be34ea004f6adb", "blockNumber": 30250284, "data": "0x0000000000000000000000000000000000000000000000000004ec1adb56180000000000000000000000000000000000000000000000000000aee5efc69a35780000000000000000000000000000000000000000000012030073d0903ce7f72900000000000000000000000000000000000000000000000000a9f9d4eb441d780000000000000000000000000000000000000000000012030078bcab183e0f29", "index": 0, "removed": null, "topics": [ "0x4dfe1bbbcf077ddc3e01291eea2d5c70c2b422b415d95645b9adcfd678cb1d63", "0x0000000000000000000000000000000000000000000000000000000000001010", "0x00000000000000000000000036b95469dd6ea8d1e17c6bc65513e8c9f53ec50a", "0x0000000000000000000000007ee41d8a25641000661b1ef5e6ae8a00400466b0" ], "transactionHash": "0x7248d457fb5d6c7c3a870aa89252e90a6f5cb5aeeed7fe4c85433dcca3908980", "transactionIndex": 0 } ], "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000040000000000000000000000800000000000000000000100000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000020000000400000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000004000000000000000000001000000000000020000400000000000100000000000000000000000000000000000000000000000000000000200000000000000100000", "root": null, "status": 0, "to": "0xA9E3bf15148EA340e76B851483486ca546eD8018" }, code=CALL_EXCEPTION, version=6.16.0)
