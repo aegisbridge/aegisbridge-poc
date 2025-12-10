@@ -1,382 +1,604 @@
-# AegisBridge PoC – Sepolia ↔ Amoy Testnet Bridge
+# AegisBridge – Sepolia ↔ Polygon Amoy Testnet Bridge (v2, Two-Way)
 
-AegisBridge is a proof-of-concept cross-chain bridge between:
+AegisBridge is a minimal two-way bridge prototype between:
 
-- **Ethereum Sepolia** (source chain)
-- **Polygon Amoy** (target chain)
+- **Ethereum Sepolia** (canonical token: `ATT`)
+- **Polygon Amoy** (wrapped token: `wATT`)
 
-The design is intentionally simple and opinionated:
+The bridge supports:
 
-- One **source token** on Sepolia (`ATT`)
-- One **wrapped token** on Amoy (`wATT`)
-- Two bridge contracts:
-  - `SourceBridge` on Sepolia (lock / unlock)
-  - `TargetBridge` on Amoy (mint / burn)
-- One **off-chain relayer**:
-  - Listens to events on both chains
-  - Mints / unlocks on the opposite chain
-  - Exposes a simple `/health` HTTP endpoint
+- **Forward**: Sepolia → Amoy (lock `ATT` → mint `wATT`)
+- **Reverse**: Amoy → Sepolia (request a return with `wATT` → release `ATT`)
 
-This repo contains:
-
-- Hardhat contracts + deployments
-- A minimal **testnet dApp** (v0.4) in `/frontend`
-- A **testnet relayer** (v0.4.2) in `/scripts/testnet_relayer.js`
+All operations are protected with **nonce tracking** to prevent double-minting and double-release.
 
 ---
 
-## Current Testnet Deployment
+## 1. Contracts & Addresses (Current Test Deployment)
 
-> These are **testnet only**. Subject to redeploys.
+> These addresses come from the latest local test deployment.  
+> If you redeploy, update both your `.env` and this section accordingly.
 
 ### Sepolia
 
-- **SourceBridge**: `0x4Fb169EDA4C92de96634595d36571637CFbb4437`
-- **ATT (ERC-20)**: `0xDc925c125DC7b51946031761c1693eA6238Bf3fb`
+- **ATT (canonical token)**  
+  `0xDc925c125DC7b51946031761c1693eA6238Bf3fb`
 
-### Amoy
+- **SourceBridge v2**  
+  `0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99`
 
-- **TargetBridge**: `0xA9E3bf15148EA340e76B851483486ca546eD8018`
-- **wATT (wrapped ATT)**: `0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4`
+### Polygon Amoy
 
-### Relayer / Deployer Address
+- **wATT (wrapped token)**  
+  `0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4`
 
-- **Deployer / Relayer EOA**: `0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a`
+- **TargetBridge v2**  
+  `0x682E40B79E79adCC8CeFED7C42f5f268386B0c66`
 
----
+### Roles
 
-## What’s New in This Update (v0.4 / v0.4.2)
-
-This README describes the state after the **local testnet run** where we successfully bridged 10 ATT round-trip (Sepolia → Amoy → Sepolia).
-
-### v0.4 – Testnet dApp (frontend)
-
-- Simple single-page dApp in `/frontend`:
-  - Wallet connection via MetaMask / EIP-1193 provider
-  - **Two directions**:
-    - `Sepolia → Amoy` (lock → mint)
-    - `Amoy → Sepolia` (burn → unlock)
-  - Amount parsing + raw `wei` conversion
-  - Auto-`approve()` if allowance is too low
-  - Structured logs in the UI panel (`// logs will appear here…`)
-- Manual flows successfully tested:
-  - `approve` ATT on Sepolia
-  - `lock` ATT on Sepolia
-  - `burnToSource` on Amoy
-
-### v0.4.2 – Testnet Relayer
-
-`/scripts/testnet_relayer.js`:
-
-- Listens for events:
-
-  - On **Sepolia / SourceBridge**:
-    - `Locked(user, recipient, amount, nonce)`
-  - On **Amoy / TargetBridge**:
-    - `BurnToSource(from, to, amount, burnNonce)`
-
-- Sends transactions:
-
-  - On **Amoy / TargetBridge**:
-    - `mintFromSource(recipient, amount, nonce)`
-  - On **Sepolia / SourceBridge**:
-    - `unlockFromTarget(recipient, amount, burnNonce)`
-
-- Features:
-
-  - Reads RPC & keys from `.env`
-  - Uses **Hardhat artifacts** for ABIs with fallback paths:
-    - `artifacts/contracts/SourceBridge.sol/SourceBridge.json`
-    - `artifacts/contracts/TargetBridge.sol/TargetBridge.json`
-  - Idempotent processing:
-    - Keeps a local `relayer_state.json` with processed `nonces` / `burnNonces`
-    - Also optionally checks on-chain `processedNonces` / `processedBurnNonces`
-  - **Retry + backoff** for transient failures
-  - Support for **initial catch-up sync** (can be disabled)
-  - **Health endpoint** on `http://127.0.0.1:8081/health`
-  - **Gas limit override** for Polygon Amoy to avoid:
-    - `INTERNAL_ERROR: gas limit is too high`
+- **Owner** – the deployer (currently `0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a`)
+- **Relayer** – the EOA allowed to call `mintFromSource` and `releaseFromTarget`  
+  (currently the same address as the owner, and can be updated via `setRelayer()` on each bridge).
 
 ---
 
-## Environment Setup
+## 2. High-Level Architecture
 
-Create a `.env` file in the project root (same level as `package.json`), with at least:
+### Forward Direction: Sepolia → Amoy
 
-```env
+1. User on Sepolia:
+   - Calls `ATT.approve(SourceBridge, amount)`
+   - Calls `SourceBridge.lock(amount)`
+
+2. `SourceBridge` on Sepolia:
+   - Pulls `amount` of `ATT` from the user into the bridge contract
+   - Increments `currentNonce`
+   - Emits `Locked(user, amount, nonce)`
+
+3. Relayer (off-chain) on Amoy:
+   - Listens to `Locked` events on Sepolia
+   - Calls `TargetBridge.mintFromSource(user, amount, nonce)` on Amoy
+
+4. `TargetBridge` on Amoy:
+   - Checks `processedNonces[nonce] == false`
+   - Sets `processedNonces[nonce] = true`
+   - Mints `amount` of `wATT` to `user`
+   - Emits `MintedFromSource(user, amount, nonce)`
+
+---
+
+### Reverse Direction: Amoy → Sepolia
+
+1. User on Amoy:
+   - Calls `wATT.approve(TargetBridge, amount)`
+   - Calls `TargetBridge.requestReturnToSource(amount)`
+
+2. `TargetBridge` on Amoy:
+   - Transfers `amount` of `wATT` from the user to the bridge contract  
+     (`transferFrom(msg.sender, address(this), amount)`)
+   - Increments `currentReturnNonce`
+   - Emits `ReturnRequested(user, amount, returnNonce)`
+
+3. Relayer (off-chain) on Sepolia:
+   - Listens to `ReturnRequested` events on Amoy
+   - Calls `SourceBridge.releaseFromTarget(user, amount, returnNonce)`
+
+4. `SourceBridge` on Sepolia:
+   - Checks `processedReturnNonces[returnNonce] == false`
+   - Sets `processedReturnNonces[returnNonce] = true`
+   - Transfers `amount` of `ATT` from the bridge contract to `user`
+   - Emits `ReleasedFromTarget(user, amount, returnNonce)`
+
+---
+
+## 3. Contract Interfaces (Summary)
+
+### SourceBridge (Sepolia)
+
+Main responsibilities:
+
+- Lock canonical `ATT` for forward bridging
+- Release locked `ATT` when a valid reverse request is observed
+
+Key functions:
+
+```solidity
+// Lock ATT for bridging to Amoy
+function lock(uint256 amount) external returns (uint256 nonce);
+
+// Release ATT based on a return request from Amoy
+function releaseFromTarget(
+    address to,
+    uint256 amount,
+    uint256 nonce
+) external onlyRelayer;
+
+// Forward nonce (Sepolia -> Amoy)
+uint256 public currentNonce;
+
+// Reverse nonces (Amoy -> Sepolia) that have been processed
+mapping(uint256 => bool) public processedReturnNonces;
+
+// Update the relayer address
+function setRelayer(address _relayer) external onlyOwner;
+```
+
+Key events:
+
+```solidity
+event Locked(address indexed user, uint256 amount, uint256 indexed nonce);
+event ReleasedFromTarget(address indexed user, uint256 amount, uint256 indexed nonce);
+event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
+```
+
+---
+
+### TargetBridge (Amoy)
+
+Main responsibilities:
+
+- Mint `wATT` when a valid lock is detected on Sepolia
+- Accept return requests and hold `wATT` for reverse bridging
+
+Key functions:
+
+```solidity
+// Mint wATT based on a lock on Sepolia
+function mintFromSource(
+    address to,
+    uint256 amount,
+    uint256 nonce
+) external onlyRelayer;
+
+// Request a return to Sepolia by surrendering wATT to the bridge
+function requestReturnToSource(uint256 amount) external;
+
+// Forward nonces (Sepolia -> Amoy) that have been processed
+mapping(uint256 => bool) public processedNonces;
+
+// Reverse nonce counter (Amoy -> Sepolia)
+uint256 public currentReturnNonce;
+
+// Update the relayer address
+function setRelayer(address _relayer) external onlyOwner;
+```
+
+Key events:
+
+```solidity
+event MintedFromSource(address indexed to, uint256 amount, uint256 indexed nonce);
+event ReturnRequested(address indexed user, uint256 amount, uint256 indexed nonce);
+event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
+```
+
+---
+
+## 4. Project Setup
+
+### Install dependencies
+
+```bash
+npm install
+# or
+yarn install
+```
+
+### Example `.env`
+
+Create a `.env` file in the project root:
+
+```dotenv
 # RPC endpoints
 SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
 AMOY_RPC_URL=https://polygon-amoy.g.alchemy.com/v2/YOUR_KEY
 
-# Relayer / deployer private key (same EOA on both chains)
-DEPLOYER_PRIVATE_KEY=0x...
+# Private key used by Hardhat (deployer/relayer)
+DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+BRIDGE_RELAYER=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
 
-# Optional: environment label
-NETWORK_ENV=testnet
+# Tokens
+ATT_SEPOLIA=0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+WATT_AMOY=0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
 
-# Optional: relayer health / polling
-HEALTH_PORT=8081
-RELAYER_HEALTH_INTERVAL_MS=5000
+# Bridge v2 contracts
+SOURCE_BRIDGE_SEPOLIA=0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
+TARGET_BRIDGE_AMOY=0x682E40B79E79adCC8CeFED7C42f5f268386B0c66
 
-# Optional: disable initial catch-up (only listen to new events)
-RELAYER_DISABLE_SYNC=true
-RELAYER_FROM_BLOCK_SEPOLIA=9800900
-RELAYER_FROM_BLOCK_AMOY=30205500
+# Default amounts for scripts (optional)
+AEGIS_LOCK_AMOUNT=1000
+AEGIS_RETURN_AMOUNT=1000
 
-# Optional: explicit gas limits (to avoid "gas limit is too high" on Amoy)
-RELAYER_MINT_GAS_LIMIT=300000
-RELAYER_UNLOCK_GAS_LIMIT=300000
+# Reverse release parameters (used by sepolia_release_from_amoy.js)
+RETURN_USER=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
+RETURN_AMOUNT=1000
+RETURN_NONCE=1
 ```
 
-> **Never commit real API keys / private keys** to Git.
+Make sure your `hardhat.config.js` reads this `.env` and configures the `sepolia` and `amoy` networks with the appropriate RPC URLs and private key.
 
 ---
 
-## Running the Testnet Relayer Locally
+## 5. Deploying Bridge v2 Contracts
 
-From the project root:
+### 5.1. Deploy SourceBridge v2 (Sepolia)
 
-```bash
-# Install dependencies (if not done yet)
-npm install
-
-# Compile contracts (ensures artifacts are present)
-npx hardhat compile
-
-# Run the relayer
-node scripts/testnet_relayer.js
-```
-
-If everything is wired correctly, you should see something like:
-
-```text
-=== AegisBridge v0.4.2 Testnet Relayer ===
-Env           : testnet
-Sepolia RPC   : ...
-Amoy RPC      : ...
-Relayer addr  : 0x36b9...
-
-Sepolia chainId : 11155111
-Amoy chainId    : 80002
-
-SourceBridge (Sepolia): 0x4Fb1...
-ATT (Sepolia)          : 0xDc92...
-TargetBridge (Amoy)    : 0xA9E3...
-wATT (Amoy)            : 0x9A06...
-========================================
-[CONFIG] ...
-[STATE] Loaded relayer_state.json with 0 lock nonces and 0 burn nonces.
-[HEALTH] HTTP health endpoint listening on port 8081
-Subscribing to live events...
-- Locked(...) on SourceBridge (Sepolia) → mintFromSource on Amoy
-- BurnToSource(...) on TargetBridge (Amoy) → unlockFromTarget on Sepolia
-Press Ctrl+C to exit.
-```
-
-### Health Endpoint
-
-With the relayer running, you can check health from another terminal:
+Script: `scripts/deploy_source_bridge_v2.js`
 
 ```bash
-curl http://127.0.0.1:8081/health
+npx hardhat run scripts/deploy_source_bridge_v2.js --network sepolia
 ```
 
-Example JSON (pretty-printed):
-
-```json
-{
-  "ok": true,
-  "env": "testnet",
-  "startedAt": "2025-12-09T13:45:26.374Z",
-  "lastTickAt": "2025-12-09T13:47:57.538Z",
-  "sepolia": {
-    "ok": true,
-    "lastBlock": 9803281,
-    "lastError": null,
-    "bridge": "0x4Fb169EDA4C92de96634595d36571637CFbb4437"
-  },
-  "amoy": {
-    "ok": true,
-    "lastBlock": 30225114,
-    "lastError": null,
-    "bridge": "0xA9E3bf15148EA340e76B851483486ca546eD8018"
-  },
-  "lastLockNonce": 10,
-  "lastBurnNonce": 10,
-  "lastError": null
-}
-```
-
-- `ok: true` → both RPCs are reachable
-- `lastLockNonce` / `lastBurnNonce` → last processed bridge events
-
----
-
-## Running the Local Testnet dApp
-
-The frontend is a minimal static dApp in `/frontend`.
-
-### 1. Start a simple HTTP server
-
-From the project root:
-
-```bash
-npx http-server .
-```
-
-You should see something like:
+Example output:
 
 ```text
-Available on:
-  http://127.0.0.1:8080
-Hit CTRL-C to stop the server
+=== Deploy SourceBridge v2 (Sepolia) ===
+Network  : sepolia
+Deployer : 0x36b9...
+ATT      : 0xDc92...
+Relayer  : 0x36b9...
+✅ SourceBridge v2 deployed at: 0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
 ```
 
-### 2. Open the dApp in your browser
+Update `.env`:
 
-Visit:
-
-```text
-http://127.0.0.1:8080/frontend/index.html
-```
-
-Make sure MetaMask is configured with:
-
-- **Sepolia** (chainId: `11155111`)
-- **Polygon Amoy** (chainId: `80002`)
-- Using the same EOA as the relayer (`0x36b9...50a`) for test runs.
-
----
-
-## Example End-to-End Flow (Local Test)
-
-This is the exact flow that was used to verify v0.4.2:
-
-### A. Sepolia → Amoy (lock → mint)
-
-1. In the dApp, select **“Sepolia → Amoy”** direction.
-2. Enter amount, for example: `10`.
-3. Click **Bridge Tokens**.
-
-The dApp will:
-
-- Send `approve()` if allowance is too low:
-  ```text
-  Allowance too low, sending approve()…
-  approve() tx: 0x...
-  approve() confirmed
-  ```
-- Then send `lock()`:
-  ```text
-  Calling bridge.lock(amount, recipient)…
-  lock tx: 0xd6599c6b...
-  ✅ Lock confirmed on Sepolia. Wait for relayer to mint wATT on Amoy.
-  ```
-
-The relayer logs:
-
-```text
-[LOCK EVENT] Sepolia Locked → nonce=10, amount=10.0, sender=0x36..., recipient=0x36..., tx=0xd6599c6b...
-[MINT] Preparing mintFromSource on Amoy: user=0x36..., amount=10.0, nonce=10, gasLimit=300000
-[TX] mintFromSource(nonce=10) — attempt 1/3
-[TX] mintFromSource(nonce=10) sent: 0xf0c90eb...
-[TX] mintFromSource(nonce=10) confirmed in block 30226020 (status=1)
-[MINT] mintFromSource successful for nonce=10, tx=undefined
-```
-
-### B. Amoy → Sepolia (burn → unlock)
-
-1. In the dApp, switch to **“Amoy → Sepolia”**.
-2. Use the same amount, e.g. `10` (the wATT you just minted).
-3. Click **Bridge Tokens**.
-
-You may see an occasional RPC hiccup like:
-
-```text
-❌ could not coalesce error (error={ "code": -32603, "message": "Internal JSON-RPC error." }, ...)
-```
-
-If so, click **Bridge Tokens** again. On success:
-
-```text
-burn tx: 0xe1d764a8...
-✅ Burn confirmed on Amoy. Wait for relayer to unlock ATT on Sepolia.
-```
-
-The relayer logs:
-
-```text
-[BURN EVENT] Amoy BurnToSource → burnNonce=10, amount=10.0, from=0x36..., to=0x36..., tx=0xe1d764a8...
-[UNLOCK] Preparing unlockFromTarget on Sepolia: recipient=0x36..., amount=10.0, burnNonce=10, gasLimit=300000
-[TX] unlockFromTarget(burnNonce=10) — attempt 1/3
-[TX] unlockFromTarget(burnNonce=10) sent: 0x2dcf5cc1...
-[TX] unlockFromTarget(burnNonce=10) confirmed in block 9803375 (status=1)
-[UNLOCK] unlockFromTarget successful for burnNonce=10, tx=undefined
-```
-
-Result:
-
-- 10 ATT was **locked** on Sepolia and **minted** as wATT on Amoy.
-- 10 wATT was **burned** on Amoy and **unlocked** back as ATT on Sepolia.
-- `lastLockNonce` and `lastBurnNonce` in `/health` are equal (10 in this test).
-
----
-
-## Development Notes
-
-- Contracts are managed with **Hardhat**.
-- Frontend is a vanilla HTML/JS app in `/frontend` (no bundler).
-- Relayer uses **ethers v6** and plain Node.js:
-  - `scripts/testnet_relayer.js`
-
-Useful commands:
-
-```bash
-# Compile contracts
-npx hardhat compile
-
-# Run a specific script
-npx hardhat run scripts/deploy_sepolia.js --network sepolia
-npx hardhat run scripts/deploy_amoy.js --network amoy
-
-# Run the relayer
-node scripts/testnet_relayer.js
-
-# Run the local frontend
-npx http-server .
+```dotenv
+SOURCE_BRIDGE_SEPOLIA=0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
 ```
 
 ---
 
-## Git Workflow (Quick Reminder)
+### 5.2. Deploy TargetBridge v2 (Amoy)
 
-From the project root:
+Script: `scripts/deploy_target_bridge_v2.js`
 
 ```bash
-git status
-git add .
-git commit -m "feat: v0.4.2 relayer (gas tuning + health) & dApp testnet flow"
-git push origin main
+npx hardhat run scripts/deploy_target_bridge_v2.js --network amoy
 ```
 
-If `git push` is rejected because the remote is ahead:
+Example output:
 
-```bash
-git pull --rebase origin main
-git push origin main
+```text
+=== Deploy TargetBridge v2 (Amoy) ===
+Deployer : 0x36b9...
+wATT     : 0x9A06...
+Relayer  : 0x36b9...
+✅ TargetBridge v2 deployed at: 0x682E40B79E79adCC8CeFED7C42f5f268386B0c66
+```
+
+Update `.env`:
+
+```dotenv
+TARGET_BRIDGE_AMOY=0x682E40B79E79adCC8CeFED7C42f5f268386B0c66
 ```
 
 ---
 
-## Roadmap (High-Level)
+## 6. Forward Flow: Sepolia → Amoy
 
-- Improve dApp UX:
-  - Better error messages for RPC failures
-  - Small retries in the frontend for transient errors (`Internal JSON-RPC error`)
-  - More explicit status indicators for each step
-- Extend documentation:
-  - Whitepaper draft (PQC message model, design goals)
-  - Security considerations and trust assumptions
-- Future networks:
-  - Mainnet-grade environments (e.g. Base, Polygon mainnet, etc.)
-  - Support for more asset types / chains
+### 6.1. Lock ATT on Sepolia
+
+Script: `scripts/sepolia_lock.js`
+
+```bash
+npx hardhat run scripts/sepolia_lock.js --network sepolia
+```
+
+Example output:
+
+```text
+Network :  sepolia
+Deployer: 0x36b9...
+ATT before: 994700.0
+ATT bridge before: 0.0
+Approve tx: 0x83cc...
+Lock tx   : 0xe9e4...
+Locked in block: 9807029
+ATT after (user)  : 993700.0
+ATT after (bridge): 1000.0
+
+➡️  Current nonce on SourceBridge v2: 1
+```
+
+This means:
+
+- 1000 `ATT` is now locked in `SourceBridge v2`
+- `currentNonce` is `1` for the forward direction
+
+---
+
+### 6.2. Mint wATT on Amoy (manual forward)
+
+If you do not have an automatic relayer yet, you can mint manually using a script like `scripts/amoy_mint_from_sepolia.js`.
+
+Typical usage:
+
+```powershell
+$env:AMOY_MINT_NONCE = "1"
+npx hardhat run scripts/amoy_mint_from_sepolia.js --network amoy
+```
+
+The script should:
+
+- Check `processedNonces[nonce]`
+- If not processed yet → call `mintFromSource(user, amount, nonce)` on `TargetBridge`
+- If already processed → log and skip
+
+---
+
+## 7. Reverse Flow: Amoy → Sepolia
+
+This is the new v2 feature: return `wATT` on Amoy and get `ATT` back on Sepolia.
+
+### 7.1. Request a Return on Amoy (user side)
+
+Script: `scripts/amoy_request_return.js`
+
+Set the amount of `wATT` you want to return:
+
+```powershell
+$env:AEGIS_RETURN_AMOUNT = "1000"
+```
+
+Then run:
+
+```bash
+npx hardhat run scripts/amoy_request_return.js --network amoy
+```
+
+Example output:
+
+```text
+=== AegisBridge: Amoy -> Sepolia (requestReturnToSource) ===
+Network      : amoy
+User         : 0x36b9...
+Token (wATT) : 0x9A06...
+Bridge       : 0x682E40B7...
+Amount       : 1000 wATT
+User balance before   : 3700.0
+Bridge balance before : 0.0
+Approve tx : 0xef55...
+Return request tx: 0x22ad...
+Return request confirmed in block: 30256306
+
+=== After requestReturnToSource ===
+Current return nonce (Amoy -> Sepolia): 1
+User balance after   : 2700.0
+Bridge balance after : 1000.0
+
+➡️  Use this return nonce on Sepolia for releaseFromTarget: 1
+```
+
+Interpretation:
+
+- User surrenders 1000 `wATT` to `TargetBridge v2`
+- `currentReturnNonce` becomes `1`
+- This `(user, amount, returnNonce)` triple is what the relayer uses on Sepolia
+
+---
+
+### 7.2. Release ATT on Sepolia (relayer side)
+
+Script: `scripts/sepolia_release_from_amoy.js`
+
+Provide the data via environment variables:
+
+```powershell
+$env:RETURN_USER   = "0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a"
+$env:RETURN_AMOUNT = "1000"
+$env:RETURN_NONCE  = "1"
+```
+
+Then run:
+
+```bash
+npx hardhat run scripts/sepolia_release_from_amoy.js --network sepolia
+```
+
+Example output:
+
+```text
+=== AegisBridge: Release from Amoy -> Sepolia ===
+Network         : sepolia
+Relayer signer  : 0x36b9...
+Bridge (Source) : 0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
+Token (ATT)     : 0xDc92...
+Recipient       : 0x36b9...
+Amount          : 1000 ATT
+Return nonce    : 1
+User balance before   : 993700.0
+Bridge balance before : 1000.0
+Release tx: 0x3c82...
+Release confirmed in block: 9807064
+
+=== After releaseFromTarget ===
+User balance after   : 994700.0
+Bridge balance after : 0.0
+
+✅ Release completed for nonce: 1
+```
+
+After this:
+
+- The user’s `ATT` balance on Sepolia is back to `994700.0`
+- `SourceBridge v2` holds `0` `ATT` (fully released)
+- `processedReturnNonces[1]` is now `true`, preventing any replay with the same return nonce
+
+---
+
+## 8. Helper Scripts
+
+### 8.1. `bridge_status.js`
+
+Checks bridge status on a given network.
+
+Example (Sepolia):
+
+```bash
+npx hardhat run scripts/bridge_status.js --network sepolia
+```
+
+Example output:
+
+```text
+=== AegisBridge Status ===
+Network   : sepolia
+Signer    : 0x36b9...
+Token     : 0xDc92...
+Bridge    : 0x1B1B61bf...
+
+Saldo ATT user   : 994700.0
+Saldo ATT bridge : 0.0
+Current nonce di SourceBridge : 1
+```
+
+You can adjust the logging to pure English if desired; the key values are:
+
+- User balance
+- Bridge balance
+- `currentNonce` on `SourceBridge`
+
+---
+
+### 8.2. `amoy_check_balance.js`
+
+Checks the `wATT` balance of the configured owner on Amoy:
+
+```bash
+npx hardhat run scripts/amoy_check_balance.js --network amoy
+```
+
+Example output:
+
+```text
+=== Cek wATT di Amoy ===
+Network : amoy
+Owner   : 0x36b9...
+Token   : 0x9A06...
+Balance wATT di Amoy: 2700.0
+```
+
+Again, you can rename labels to full English; the logic is simply reading `balanceOf(owner)`.
+
+---
+
+### 8.3. `check_target_nonce.js`
+
+Checks whether a specific forward nonce has been processed on the target bridge (Amoy).
+
+```powershell
+$env:CHECK_NONCE = "12"
+npx hardhat run scripts/check_target_nonce.js --network amoy
+```
+
+Example output:
+
+```text
+=== Check nonce on TargetBridge (Amoy) ===
+Network : amoy
+Signer  : 0x36b9...
+Bridge  : 0x682E40B7...
+Nonce   : 12
+processedNonces(12) = true
+```
+
+If `true`, this nonce has already been used for minting `wATT` and cannot be reused.
+
+---
+
+## 9. Notes & Troubleshooting
+
+### 9.1. `Error HH308: Unrecognized positional argument 1000`
+
+Avoid passing arguments directly to `hardhat run` like:
+
+```bash
+npx hardhat run scripts/sepolia_lock.js --network sepolia -- 1000
+```
+
+Instead, configure the amount using an environment variable, for example:
+
+```powershell
+$env:AEGIS_LOCK_AMOUNT = "1000"
+npx hardhat run scripts/sepolia_lock.js --network sepolia
+```
+
+---
+
+### 9.2. `no matching fragment (lock...)`
+
+This means the function signature you are calling from JS does not match the Solidity function.
+
+In v2, `lock` takes **exactly one argument**:
+
+```solidity
+function lock(uint256 amount) external returns (uint256 nonce);
+```
+
+So the script must call:
+
+```js
+await bridge.lock(amount);
+```
+
+and **not** `lock(amount, user)` or any other overload.
+
+---
+
+### 9.3. `execution reverted` in `requestReturnToSource`
+
+The original design tried to call `burnFrom`, which failed because `wATT` does not implement `burnFrom` with the expected permissions.
+
+The v2 design uses:
+
+```solidity
+bool ok = wattToken.transferFrom(msg.sender, address(this), amount);
+require(ok, "AegisBridge: transferFrom failed");
+```
+
+Make sure:
+
+- The user has enough `wATT`
+- The user has approved `TargetBridge` as a spender
+
+---
+
+### 9.4. `insufficient funds` during deployment
+
+If you see:
+
+```text
+ProviderError: INTERNAL_ERROR: insufficient funds
+```
+
+on Amoy, your deployer/relayer address does not have enough test MATIC.  
+Send some MATIC on Polygon Amoy testnet to the deployer address and redeploy.
+
+---
+
+## 10. Roadmap
+
+Planned improvements:
+
+- **Relayer v2 (two-way)**
+  - Listen to `Locked` events on Sepolia → automatically call `mintFromSource` on Amoy
+  - Listen to `ReturnRequested` events on Amoy → automatically call `releaseFromTarget` on Sepolia
+- **Frontend (Next.js)**
+  - Tabs for `Sepolia → Amoy` and `Amoy → Sepolia`
+  - Amount input, slippage display (optional), and clear status messages
+- **Monitoring & Analytics**
+  - Simple dashboard to display:
+    - Total locked `ATT`
+    - Total minted `wATT`
+    - Processed forward and reverse nonces
+
+---
+
+AegisBridge v2 is now fully capable of:
+
+- Locking canonical `ATT` on Sepolia
+- Minting `wATT` on Amoy
+- Accepting reverse requests on Amoy
+- Releasing `ATT` back on Sepolia using tracked reverse nonces
+
+This makes it a clean, testnet-ready foundation for building a real UI and more advanced, production-grade relayer logic.
