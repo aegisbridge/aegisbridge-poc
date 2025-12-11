@@ -1,123 +1,100 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @dev Interface token wATT yang bisa di-mint dan di-burn.
-///      Pastikan token wATT di Amoy mengimplementasikan fungsi ini.
-interface IMintableBurnableERC20 is IERC20 {
-    function mint(address to, uint256 amount) external;
-    function burnFrom(address account, uint256 amount) external;
-}
-
-/// @title AegisBridge Target (Amoy)
-/// @notice Mint wATT ketika ada lock di Sepolia,
-///         dan burn wATT + emit event ketika user minta return ke Sepolia.
-contract TargetBridge is Ownable {
-    /// @notice Token wrapped di Amoy (wATT)
-    IMintableBurnableERC20 public immutable wattToken;
-
-    /// @notice Relayer yang diizinkan memproses mint dari Sepolia
+contract TargetBridge is Ownable, ReentrancyGuard {
+    IERC20 public immutable wrappedToken; // wATT di Amoy
     address public relayer;
 
-    /// @notice Nonce-from-Source (Sepolia -> Amoy) yang sudah diproses
-    ///         untuk mencegah double-mint
+    // Forward direction: Sepolia -> Amoy
     mapping(uint256 => bool) public processedNonces;
 
-    /// @notice Nonce untuk arah Amoy -> Sepolia (reverse bridge)
+    // Reverse direction: Amoy -> Sepolia
+    mapping(uint256 => bool) public processedReturnNonces;
     uint256 public currentReturnNonce;
 
-    /// @dev Event ketika relayer memproses mint dari Sepolia
-    event MintedFromSource(
-        address indexed to,
-        uint256 amount,
-        uint256 indexed nonce
-    );
+    /// Emitted when relayer mengirim wATT ke user (bridge dari Sepolia)
+    event MintFromSource(address indexed user, uint256 amount, uint256 nonce);
 
-    /// @dev Event ketika user minta kirim balik ke Sepolia
-    event ReturnRequested(
-        address indexed user,
-        uint256 amount,
-        uint256 indexed nonce
-    );
+    /// Emitted ketika user minta return (Amoy -> Sepolia)
+    event ReturnRequested(address indexed user, uint256 amount, uint256 returnNonce);
 
-    /// @dev Event saat relayer diganti
     event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
+    event PoolWithdrawn(address indexed to, uint256 amount);
 
     modifier onlyRelayer() {
-        require(msg.sender == relayer, "AegisBridge: caller is not relayer");
+        require(msg.sender == relayer, "TargetBridge: not relayer");
         _;
     }
 
-    /// @param _wattToken alamat wATT di Amoy
-    /// @param _relayer alamat relayer awal (biasanya deployer / EOA khusus)
-    constructor(address _wattToken, address _relayer)
-        Ownable(msg.sender)     // ⬅️ penting: set owner untuk Ownable v5
-    {
-        require(_wattToken != address(0), "AegisBridge: wattToken = zero");
-        require(_relayer != address(0), "AegisBridge: relayer = zero");
+    constructor(
+        address _wrappedToken,
+        address _relayer,
+        address _initialOwner
+    ) Ownable(_initialOwner) {
+        require(_wrappedToken != address(0), "TargetBridge: wrappedToken=0");
+        require(_relayer != address(0), "TargetBridge: relayer=0");
 
-        wattToken = IMintableBurnableERC20(_wattToken);
+        wrappedToken = IERC20(_wrappedToken);
         relayer = _relayer;
     }
 
-    /// @notice Ganti relayer yang diizinkan memanggil mintFromSource
     function setRelayer(address _relayer) external onlyOwner {
-        require(_relayer != address(0), "AegisBridge: relayer = zero");
-        address old = relayer;
+        require(_relayer != address(0), "TargetBridge: relayer=0");
+        emit RelayerUpdated(relayer, _relayer);
         relayer = _relayer;
-        emit RelayerUpdated(old, _relayer);
     }
 
-    // -------------------------------------------------------------------------
-    // FORWARD DIRECTION: Sepolia -> Amoy
-    // -------------------------------------------------------------------------
-
-    /// @notice Relayer memint wATT di Amoy berdasarkan lock di Sepolia.
-    /// @dev Dipanggil menggunakan data dari event Locked di SourceBridge (Sepolia).
-    /// @param to penerima wATT di Amoy
-    /// @param amount jumlah wATT yang akan di-mint
-    /// @param nonce nonce dari SourceBridge (currentNonce)
+    /// Dipanggil relayer ketika ada event Locked di Sepolia
+    /// NOTE: sekarang pakai token pool, bukan mint
     function mintFromSource(
         address to,
         uint256 amount,
         uint256 nonce
-    ) external onlyRelayer {
-        require(to != address(0), "AegisBridge: invalid recipient");
-        require(amount > 0, "AegisBridge: amount = 0");
-        require(!processedNonces[nonce], "AegisBridge: nonce already processed");
+    ) external nonReentrant onlyRelayer {
+        require(to != address(0), "TargetBridge: to=0");
+        require(amount > 0, "TargetBridge: amount=0");
+        require(!processedNonces[nonce], "TargetBridge: nonce already processed");
 
         processedNonces[nonce] = true;
 
-        // Mint wATT ke user. Pastikan wattToken mengizinkan kontrak ini untuk mint.
-        wattToken.mint(to, amount);
+        uint256 poolBal = wrappedToken.balanceOf(address(this));
+        require(poolBal >= amount, "TargetBridge: insufficient wATT in pool");
 
-        emit MintedFromSource(to, amount, nonce);
+        bool ok = wrappedToken.transfer(to, amount);
+        require(ok, "TargetBridge: wATT transfer failed");
+
+        emit MintFromSource(to, amount, nonce);
     }
 
-    // -------------------------------------------------------------------------
-    // REVERSE DIRECTION: Amoy -> Sepolia
-    // -------------------------------------------------------------------------
+    /// User kirim wATT ke bridge, dan nanti di-release ATT di Sepolia
+    function requestReturnToSource(uint256 amount) external nonReentrant {
+        require(amount > 0, "TargetBridge: amount=0");
 
-    /// @notice User di Amoy minta kirim balik ke Sepolia.
-    /// @dev User harus `approve` wATT ke kontrak bridge ini sebelum memanggil.
-    ///      Kontrak akan memanggil `burnFrom(msg.sender, amount)` pada wATT.
-    /// @param amount jumlah wATT yang akan di-burn dan direquest return-nya
-    function requestReturnToSource(uint256 amount) external {
-    require(amount > 0, "AegisBridge: amount = 0");
+        currentReturnNonce += 1;
 
-    // Ambil wATT dari user ke kontrak bridge (escrow).
-    bool ok = wattToken.transferFrom(msg.sender, address(this), amount);
-    require(ok, "AegisBridge: transferFrom failed");
+        bool ok = wrappedToken.transferFrom(msg.sender, address(this), amount);
+        require(ok, "TargetBridge: transferFrom failed");
 
-    uint256 nonce = ++currentReturnNonce;
+        // Disimpan hanya kalau kamu mau pakai di masa depan
+        processedReturnNonces[currentReturnNonce] = true;
 
-    emit ReturnRequested(msg.sender, amount, nonce);
-}
+        emit ReturnRequested(msg.sender, amount, currentReturnNonce);
+    }
 
-    /// @notice Helper untuk mengecek apakah nonce forward sudah pernah dipakai.
-    function isNonceProcessed(uint256 nonce) external view returns (bool) {
-        return processedNonces[nonce];
+    /// View helper: saldo wATT yang dipegang bridge
+    function poolBalance() external view returns (uint256) {
+        return wrappedToken.balanceOf(address(this));
+    }
+
+    /// Owner bisa tarik wATT dari pool kalau butuh (misal reset testnet)
+    function ownerWithdraw(uint256 amount, address to) external onlyOwner {
+        require(to != address(0), "TargetBridge: to=0");
+        bool ok = wrappedToken.transfer(to, amount);
+        require(ok, "TargetBridge: withdraw failed");
+        emit PoolWithdrawn(to, amount);
     }
 }

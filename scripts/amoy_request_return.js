@@ -1,78 +1,111 @@
 // scripts/amoy_request_return.js
-const hre = require("hardhat");
+// Request return wATT -> ATT (Amoy -> Sepolia)
+// Jalankan dengan:
+//   npx hardhat run scripts/amoy_request_return.js --network amoy
+// atau kirim jumlah custom (dalam SATUAN TOKEN, bukan wei), contoh:
+//   npx hardhat run scripts/amoy_request_return.js --network amoy -- 500
+
+const { ethers } = require("hardhat");
+require("dotenv").config();
+
+const DECIMALS = 18;
+
+function parseAmountArg() {
+  // arg setelah "--" (opsional)
+  const raw = process.argv[2];
+  if (!raw) {
+    // default 1000 wATT
+    return 1000n;
+  }
+  try {
+    return BigInt(raw);
+  } catch (e) {
+    throw new Error(`Argumen amount tidak valid: "${raw}". Gunakan angka bulat, contoh: 500`);
+  }
+}
 
 async function main() {
-  const { ethers } = hre;
   const [signer] = await ethers.getSigners();
+  const user = await signer.getAddress();
+  const net = await signer.provider.getNetwork();
 
-  const tokenAddress = process.env.WATT_AMOY;
-  const bridgeAddress = process.env.TARGET_BRIDGE_AMOY;
-  const rawAmount = process.env.AEGIS_RETURN_AMOUNT || "1000"; // dalam satuan token (bukan wei)
+  const WATT_AMOY = process.env.WATT_AMOY;
+  const TARGET_BRIDGE_AMOY = process.env.TARGET_BRIDGE_AMOY;
 
-  if (!tokenAddress || !bridgeAddress) {
-    console.error("❌ WATT_AMOY atau TARGET_BRIDGE_AMOY belum di-set di .env");
-    process.exit(1);
+  if (!WATT_AMOY || !TARGET_BRIDGE_AMOY) {
+    throw new Error(
+      "Missing WATT_AMOY atau TARGET_BRIDGE_AMOY di .env (pastikan pakai alamat wATT & TargetBridge v2 yang terbaru)"
+    );
   }
 
-  const erc20Abi = [
-    "function balanceOf(address) view returns (uint256)",
-    "function decimals() view returns (uint8)",
-    "function symbol() view returns (string)",
-    "function approve(address spender, uint256 amount) returns (bool)"
-  ];
+  const humanAmount = parseAmountArg();          // contoh: 1000
+  const amount = humanAmount * 10n ** 18n;       // ke wei (18 desimal)
 
-  const token = await ethers.getContractAt(erc20Abi, tokenAddress);
-  const decimals = await token.decimals();
-  const symbol = await token.symbol();
+  console.log("=== Request Return wATT -> ATT (Amoy → Sepolia) ===");
+  console.log(`Network : ${net.chainId} (amoy)`);
+  console.log(`User    : ${user}`);
+  console.log(`wATT    : ${WATT_AMOY}`);
+  console.log(`Bridge  : ${TARGET_BRIDGE_AMOY}`);
+  console.log(`Amount  : ${humanAmount.toString()} wATT\n`);
 
-  const parseUnits = ethers.parseUnits ?? ethers.utils.parseUnits;
-  const formatUnits = ethers.formatUnits ?? ethers.utils.formatUnits;
+  // NOTE: wATT pakai ABI yang sama dengan ATT (ERC20)
+  const watt = await ethers.getContractAt("ATT", WATT_AMOY, signer);
+  const bridge = await ethers.getContractAt("TargetBridge", TARGET_BRIDGE_AMOY, signer);
 
-  const amount = parseUnits(rawAmount, decimals);
+  const symbol = await watt.symbol();
+  const balBefore = await watt.balanceOf(user);
 
-  const userBefore = await token.balanceOf(signer.address);
-  const bridgeBefore = await token.balanceOf(bridgeAddress);
+  console.log(`Saldo ${symbol} sebelum (user): ${ethers.formatUnits(balBefore, DECIMALS)}`);
 
-  console.log("=== AegisBridge: Amoy -> Sepolia (requestReturnToSource) ===");
-  console.log("Network      :", hre.network.name);
-  console.log("User         :", signer.address);
-  console.log("Token (wATT) :", tokenAddress);
-  console.log("Bridge       :", bridgeAddress);
-  console.log("Amount       :", rawAmount, symbol);
-  console.log("User balance before   :", formatUnits(userBefore, decimals));
-  console.log("Bridge balance before :", formatUnits(bridgeBefore, decimals));
+  if (balBefore < amount) {
+    console.log(
+      `❌ Saldo ${symbol} tidak cukup untuk requestReturn ${humanAmount.toString()} ${symbol}`
+    );
+    return;
+  }
 
-  // 1) Approve
-  const approveTx = await token.approve(bridgeAddress, amount);
-  console.log("Approve tx :", approveTx.hash);
-  await approveTx.wait();
+  // 1) Cek allowance ke bridge
+  const allowance = await watt.allowance(user, TARGET_BRIDGE_AMOY);
+  if (allowance < amount) {
+    console.log(
+      `Approve ${humanAmount.toString()} ${symbol} ke TargetBridge (butuh allowance baru)...`
+    );
+    const approveTx = await watt.approve(TARGET_BRIDGE_AMOY, amount);
+    console.log(`Approve tx hash : ${approveTx.hash}`);
+    const approveReceipt = await approveTx.wait();
+    console.log(`Approve mined in block: ${approveReceipt.blockNumber}\n`);
+  } else {
+    console.log("Allowance sudah cukup → skip approve\n");
+  }
 
-  // 2) Panggil requestReturnToSource di TargetBridge
-  const TargetBridge = await ethers.getContractFactory("TargetBridge");
-  const bridge = TargetBridge.attach(bridgeAddress);
+  // 2) Panggil fungsi requestReturn di TargetBridge v2
+  const fnName = process.env.TARGET_REQUEST_RETURN_FN || "requestReturn";
+  console.log(
+    `Call ${fnName}(${humanAmount.toString()} ${symbol}) pada TargetBridge v2 untuk minta return ke Sepolia...`
+  );
 
-  const tx = await bridge.requestReturnToSource(amount);
-  console.log("Return request tx:", tx.hash);
-  const receipt = await tx.wait();
-  console.log("Return request confirmed in block:", receipt.blockNumber);
+  if (typeof bridge[fnName] !== "function") {
+    throw new Error(
+      `Fungsi "${fnName}" tidak ditemukan di TargetBridge. ` +
+        `Set env TARGET_REQUEST_RETURN_FN ke nama fungsi yang benar kalau di Solidity namanya berbeda.`
+    );
+  }
 
-  // 3) Baca nonce reverse terakhir
-  const currentReturnNonce = await bridge.currentReturnNonce();
+  const returnTx = await bridge[fnName](amount);
+  console.log(`Return tx hash : ${returnTx.hash}`);
+  const receipt = await returnTx.wait();
+  console.log(`Return tx mined in block: ${receipt.blockNumber}`);
 
-  const userAfter = await token.balanceOf(signer.address);
-  const bridgeAfter = await token.balanceOf(bridgeAddress);
+  const balAfter = await watt.balanceOf(user);
+  console.log(`\nSaldo ${symbol} sesudah (user): ${ethers.formatUnits(balAfter, DECIMALS)}`);
 
-  console.log("");
-  console.log("=== After requestReturnToSource ===");
-  console.log("Current return nonce (Amoy -> Sepolia):", currentReturnNonce.toString());
-  console.log("User balance after   :", formatUnits(userAfter, decimals));
-  console.log("Bridge balance after :", formatUnits(bridgeAfter, decimals));
-
-  console.log("");
-  console.log("➡️  Gunakan return nonce ini di Sepolia untuk releaseFromTarget:", currentReturnNonce.toString());
+  console.log(
+    "\n➡️  Jika `testnet_relayer_v2.js` lagi running, relayer akan nangkep event `ReturnRequested` ini di Amoy " +
+      "dan otomatis call unlock di SourceBridge (Sepolia) supaya ATT kamu balik."
+  );
 }
 
 main().catch((err) => {
-  console.error("❌ Error amoy_request_return:", err);
-  process.exitCode = 1;
+  console.error("Error amoy_request_return:", err);
+  process.exit(1);
 });
