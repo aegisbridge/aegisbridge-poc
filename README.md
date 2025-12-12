@@ -1,83 +1,52 @@
-# AegisBridge PoC – Sepolia ↔ Polygon Amoy
+# AegisBridge PoC v2 – Sepolia ↔ Polygon Amoy
 
-> **Status:** Internal testnet PoC (ATT ↔ wATT). **Do not use in production.**
+AegisBridge is a minimal cross-chain bridge proof‑of‑concept (PoC) between **Ethereum Sepolia** and **Polygon Amoy** testnets.
 
-AegisBridge is a minimal cross–chain bridge Proof‑of‑Concept between:
+The current v2 design bridges a single ERC‑20 test token:
 
-- **Ethereum Sepolia** (L1 testnet) – ERC‑20 **ATT**
-- **Polygon Amoy** (L2 testnet) – ERC‑20 **wATT**
+- **ATT** on Sepolia → locked in a **SourceBridge**
+- **wATT** on Amoy → minted/burned via a **TargetBridge**
+- A **Node.js relayer** watches events on both chains and routes the messages:
 
-The flow:
-
-- **Forward (Sepolia → Amoy)**  
-  User locks **ATT** in `SourceBridge` on Sepolia → relayer watches `Locked` events → relayer calls `mintFromSource` on `TargetBridge` → mints **wATT** to the user on Amoy.
-- **Reverse (Amoy → Sepolia)**  
-  User approves + calls `requestReturnToSource` on `TargetBridge` with **wATT** → relayer watches `ReturnRequested` events → relayer calls `unlockFromTarget` on `SourceBridge` → unlocks **ATT** back to the user on Sepolia.
+  - `Locked` on Sepolia → `mintFromSource` on Amoy  
+  - `ReturnRequested` on Amoy → `releaseFromTarget` on Sepolia
 
 This repo contains:
 
-- Solidity contracts (`contracts/`)
-- Hardhat config + deploy scripts (`hardhat.config.js`, `scripts/deploy_*.js`)
-- Node relayer (`scripts/testnet_relayer.js`)
-- Helper scripts for testing (`scripts/*.js`)
+- Solidity contracts (SourceBridge, TargetBridge, ATT & wATT)
+- Hardhat config + deployment scripts
+- Relayer script (`scripts/testnet_relayer.js`)
+- Helper scripts for approvals, balance checks, and manual test flows
 
 ---
 
-## 1. Deployments (current test setup)
+## 1. Requirements
 
-### Sepolia (Ethereum testnet)
+- Node.js **>= 20** (tested with Node 20.x)
+- npm **>= 10**
+- `git`
+- A wallet with test ETH on Sepolia & test MATIC on Amoy
+- RPC endpoints for Sepolia & Amoy (Alchemy, public RPC, etc.)
 
-- **ATT token**  
-  `ATT_SEPOLIA = 0xDc925c125DC7b51946031761c1693eA6238Bf3fb`
-- **SourceBridge v2 (active)**  
-  `SEPOLIA_SOURCE_BRIDGE = 0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99`
-
-### Polygon Amoy (Polygon testnet)
-
-- **wATT token**  
-  `AMOY_WATT_TOKEN = 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4`
-- **TargetBridge v2 (active)**  
-  `AMOY_TARGET_BRIDGE_V2 = 0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5`
-
-### Relayer wallet (both sides)
-
-- **Relayer / test EOA**  
-  `0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a`  
-  This address:
-  - Owns test **ATT** on Sepolia
-  - Receives **wATT** on Amoy
-  - Is also used as the relayer signer
-
----
-
-## 2. Requirements
-
-Locally (VS Code / Windows) and on VPS (Ubuntu 22.04):
-
-- **Node.js 20 LTS** (tested with `v20.19.6`)
-- **npm** (tested with `10.x`)
-- **NVM** (optional but used on VPS)
-- **Hardhat** (installed via `npm install`)
-- **pm2** for running the relayer as a daemon (on VPS)
-
-Quick check:
+Global tools (optional but recommended):
 
 ```bash
-node -v
-npm -v
-npx hardhat --version
-pm2 -v      # on VPS
+npm install -g pm2
 ```
 
 ---
 
-## 3. Install & Compile
+## 2. Installation
 
-Clone and install:
+Clone repo & install dependencies:
 
 ```bash
 git clone https://github.com/aegisbridge/aegisbridge-poc.git
 cd aegisbridge-poc
+
+# (Optional but recommended if you use nvm)
+nvm install 20
+nvm use 20
 
 # Install dependencies
 npm install
@@ -86,46 +55,47 @@ npm install
 npx hardhat compile
 ```
 
-You should see:
+You should see something like:
 
-```bash
-Compiled 14 Solidity files successfully (evm target: paris).
+```text
+Compiled X Solidity files successfully (evm target: paris).
 ```
 
 ---
 
-## 4. Environment (.env) layout
+## 3. Environment Configuration (`.env`)
 
-> **Important:** Never commit `.env`. Private keys and RPC keys must stay local.
+Create a `.env` file in the project root. Below is a **sanitized example** – **never commit real private keys**.
 
-Example `.env` structure (simplified, using actual PoC addresses but placeholder secrets):
-
-```ini
+```env
 ##############################
 # === RPC ENDPOINTS ===
 ##############################
 
-# Sepolia RPC (primary + backups)
-SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/<YOUR_KEY>
+# Sepolia RPC (utama + backup)
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 SEPOLIA_RPC_URL_1=https://0xrpc.io/sep
 SEPOLIA_RPC_URL_2=https://eth-sepolia-testnet.api.pocket.network
 SEPOLIA_RPC_URL_3=https://ethereum-sepolia-rpc.publicnode.com
 SEPOLIA_RPC_URL_4=
 
-# Amoy RPC (primary + backups)
+# Amoy RPC (utama + backup)
 AMOY_RPC_URL=https://polygon-amoy-public.nodies.app
 AMOY_RPC_URL_1=https://polygon-amoy.drpc.org
 AMOY_RPC_URL_2=https://rpc-amoy.polygon.technology
-AMOY_RPC_URL_3=https://polygon-amoy.g.alchemy.com/v2/<YOUR_KEY>
+AMOY_RPC_URL_3=https://polygon-amoy.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
+
 
 ##############################
-# === KEYS (DO NOT COMMIT) ===
+# === KEYS (JANGAN DI-COMMIT) ===
 ##############################
 
-# Single test key used for deploy, tests, and relayer signer
-PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE
-DEPLOYER_PRIVATE_KEY=${PRIVATE_KEY}
-TEST_SENDER_PRIVATE_KEY=${PRIVATE_KEY}
+# Wallet yang dipakai untuk deploy + test (harus sama di Sepolia & Amoy)
+# PENTING: JANGAN PERNAH commit isi ini ke repo publik
+PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+TEST_SENDER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+
 
 ##############################
 # === NETWORK / HEALTH ===
@@ -134,44 +104,44 @@ TEST_SENDER_PRIVATE_KEY=${PRIVATE_KEY}
 NETWORK_ENV=testnet
 HEALTH_PORT=8081
 
+
 ##############################
-# === TOKEN & BRIDGE ADDRESSES (ACTIVE v2) ===
+# === TOKEN & BRIDGE ADDRESSES (AKTIF v2) ===
 ##############################
 
-# ATT on Sepolia
+# ATT di Sepolia
 ATT_SEPOLIA=0xDc925c125DC7b51946031761c1693eA6238Bf3fb
 
-# Source bridge v2 on Sepolia
+# Source bridge v2 di Sepolia (aktif)
 SEPOLIA_SOURCE_BRIDGE=0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
 SEPOLIA_SOURCE_BRIDGE_V2=0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
 SOURCE_BRIDGE_SEPOLIA=0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
 SEPOLIA_BRIDGE_ADDRESS=0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
 
-# Target bridge v2 on Amoy
+# Target bridge v2 di Amoy
 AMOY_TARGET_BRIDGE_V2=0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
 TARGET_BRIDGE_AMOY=0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
 
-# Test addresses
+# Test user / recipient
 TEST_SENDER_ADDRESS=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
 TEST_RECIPIENT_AMOY=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
 
-# wATT token on Amoy
+# wATT token di Amoy
 AMOY_WATT_TOKEN=0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
 WATT_AMOY=0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
 AMOY_WATT=0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
-
-# TargetBridge / pool address (same as AMOY_TARGET_BRIDGE_V2)
 AMOY_BRIDGE_ADDRESS=0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
+
 
 ##############################
 # === RELAYER CONFIG (v2) ===
 ##############################
 
-RELAYER_DRY_RUN=false
-RELAYER_MAX_RETRIES=3
-RELAYER_RETRY_DELAY_MS=10000
+     RELAYER_DRY_RUN=false
+     RELAYER_MAX_RETRIES=3
+     RELAYER_RETRY_DELAY_MS=10000
 
-# Start syncing from these blocks (can be moved earlier if needed)
+# Mulai sync dari sekitar block terakhir lock (boleh dimundurkan sedikit)
 RELAYER_FROM_BLOCK_SEPOLIA=9810800
 RELAYER_FROM_BLOCK_AMOY=30299500
 
@@ -180,21 +150,23 @@ RELAYER_POLL_INTERVAL_MS=5000
 RELAYER_MINT_GAS_LIMIT=300000
 RELAYER_UNLOCK_GAS_LIMIT=300000
 
+
 ##############################
 # === AUTO POOL / TOPUP CONFIG ===
 ##############################
 
-# Range for eth_getLogs (10 blocks for Alchemy free tier)
+# Range scan eth_getLogs (mis. max 10 block untuk tier free)
 SEPOLIA_LOG_MAX_RANGE=10
 
-# Approx first block where SourceBridge v2 was used
+# Block kira-kira awal SourceBridge v2 mulai dipakai lock
 SEPOLIA_LOCKED_FROM_BLOCK=9812700
 
-# Max auto topup for Amoy bridge pool (in wATT units, not wei)
+# Batas maksimal topup otomatis (unit wATT, bukan wei)
 AMOY_BRIDGE_TOPUP_MAX_WATT=15000
 
-# Optional: fixed topup value for legacy scripts
+# Optional: nilai tetap untuk topup manual
 WATT_POOL_TOPUP=5000
+
 
 ##############################
 # === SAMPLE RETURN FLOW (MANUAL TEST) ===
@@ -204,6 +176,7 @@ RETURN_USER=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
 RETURN_AMOUNT=1000
 RETURN_NONCE=1
 
+
 ##############################
 # === DEBUG / MISC ===
 ##############################
@@ -212,147 +185,167 @@ BRIDGE_RELAYER=0x36b95469dd6eA8d1e17c6bC65513e8c9f53ec50a
 TX_HASH=0x478004662016a12c85498bf9a0309ae6f0cb231982e1c432c5c2f0792f15bffd
 CHECK_NONCE=12
 
+
 ##############################
-# === LEGACY V1 (ONLY FOR OLD SCRIPTS) ===
+# === LEGACY V1 (OPSIONAL) ===
 ##############################
 
 BRIDGE_CONTRACT_SEPOLIA=0x4Fb169EDA4C92de96634595d36571637CFbb4437
 BRIDGE_CONTRACT_AMOY=0xA9E3bf15148EA340e76B851483486ca546eD8018
 ```
 
+> Note: alamat ATT/wATT/bridge di atas sudah diisi dengan **alamat v2 aktif** di environment pengujian ini. Sesuaikan jika kamu deploy ulang.
+
 ---
 
-## 5. Relayer – run on VPS with pm2
+## 4. Running the Relayer
 
-On the VPS (Ubuntu), from `/home/<your_username>/aegisbridge-poc`:
+Relayer adalah Node.js service yang:
 
-### 5.1 Start relayer
+- Listen event `Locked` di `SourceBridge` (Sepolia), lalu memanggil `mintFromSource` di `TargetBridge` (Amoy)
+- Listen event `ReturnRequested` di `TargetBridge` (Amoy), lalu memanggil `releaseFromTarget` di `SourceBridge` (Sepolia)
+
+### 4.1 Run relayer secara lokal (dev)
 
 ```bash
-# Make sure Node 20 is active
-nvm use 20
-
-# Start relayer
-pm2 start scripts/testnet_relayer.js --name aegisbridge-relayer-testnet
-
-# Optional: check logs
-pm2 logs aegisbridge-relayer-testnet --lines 50
-
-# Persist pm2 process list across reboot
-pm2 save
+node scripts/testnet_relayer.js
 ```
 
-You should see logs like:
+Kamu akan melihat log kurang lebih seperti:
 
 ```text
-=== AegisBridge v2 Testnet Relayer (Node) ===
+[RPC][sepolia] dipakai:
+  - (primary) https://eth-sepolia.g.alchemy.com/v2/...
+[RPC][amoy] dipakai:
+  - (primary) https://polygon-amoy-public.nodies.app
+  - (backup #1) https://rpc-amoy.polygon.technology
+  - (backup #2) https://polygon-amoy.g.alchemy.com/v2/...
+
+=== AegisBridge v2 Testnet Relayer (Node) ====
 Env            : testnet
-Sepolia RPC    : ...
-Amoy RPC       : ...
-SourceBridge   : 0x1B1B...
-TargetBridge   : 0x3438...
-ATT (Sepolia)  : 0xDc92...
-wATT (Amoy)    : 0x9A06...
+SourceBridge   : 0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
+TargetBridge   : 0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
+ATT (Sepolia)  : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+wATT (Amoy)    : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
 Relayer wallet : 0x36b9...
 Dry run        : false
 ```
 
-The relayer will:
+### 4.2 Run relayer di VPS dengan PM2
 
-- Watch **Sepolia SourceBridge** for `Locked` events
-- Call **Amoy TargetBridge** `mintFromSource(to, amount, nonce)` for each new event
-- Watch **Amoy TargetBridge** for `ReturnRequested` events
-- Call **Sepolia SourceBridge** `releaseFromTarget(...)` to unlock ATT back
+Di VPS (misal user `qolandanii`, folder `~/aegisbridge-poc`):
 
-### 5.2 Stop relayer (to save RPC quota)
+```bash
+cd ~/aegisbridge-poc
 
-To stop the relayer but keep pm2 installed:
+# Start relayer
+pm2 start scripts/testnet_relayer.js --name aegisbridge-relayer-testnet
+
+# Lihat log
+pm2 logs aegisbridge-relayer-testnet --lines 80
+
+# Simpan process list agar auto-start saat reboot
+pm2 save
+```
+
+Untuk menghentikan:
 
 ```bash
 pm2 stop aegisbridge-relayer-testnet
-pm2 delete aegisbridge-relayer-testnet
-pm2 save --force
-```
-
-Check pm2 status:
-
-```bash
-pm2 status
-```
-
-(Optional) Disable pm2 autostart service completely:
-
-```bash
-sudo systemctl disable pm2-<your_username>
 ```
 
 ---
 
-## 6. How to test bridge (Forward: Sepolia → Amoy)
+## 5. How to Test the Bridge (Forward + Reverse)
 
-All commands below are run **locally** from the project root (e.g. `D:\aegisbridge` in VS Code).  
-Make sure `.env` is configured and the relayer on the VPS is **running**.
+Section ini jelasin alur uji coba end‑to‑end:
 
-### 6.1 Check ATT balance & allowance on Sepolia
+- **Forward bridge:** Sepolia (ATT) → Amoy (wATT)
+- **Reverse bridge:** Amoy (wATT) → Sepolia (ATT)
+
+Semua contoh command di bawah diasumsikan dijalankan dari folder project, misal di Windows:
 
 ```bash
+PS D:\aegisbridge>
+```
+
+### 5.0 Prerequisites Singkat
+
+- Kontrak sudah dideploy (ATT, wATT, SourceBridge v2, TargetBridge v2)
+- `.env` sudah diisi seperti di atas
+- Relayer **sudah berjalan** (lihat section 4)
+
+---
+
+### 5.1 Forward Bridge: Sepolia → Amoy
+
+Alur: **lock ATT di Sepolia** → relayer detect event `Locked` → **mint wATT di Amoy** ke wallet user.
+
+#### 5.1.1 Cek saldo & allowance ATT di Sepolia
+
+```bash
+# 1) Approve wATT for the bridge on Amoy
+node scripts/approve_watt_for_bridge.js 1000
+
+# 2) Request return to Sepolia
+node scripts/request_return_to_sepolia.js 1000
+
+# 3) Check balances on Amoy
+node scripts/check_watt_wallet_amoy.js
+node scripts/check_watt_amoy.js
+
+# 4) After the relayer processes the ReturnRequested event,
+#    your ATT should be unlocked on Sepolia:
 node scripts/check_att_state.js
 ```
 
-Example output:
+Contoh output:
 
 ```text
 Wallet        : 0x36b9...
-ATT address   : 0xDc92...
+ATT address   : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
 Symbol/dec    : ATT / 18
 Balance       : 982700.0
 Allowance --> Bridge: 0.0
 ```
 
-If `Allowance --> Bridge` is **0**, you must approve the bridge.
+Jika **allowance = 0**, lanjut ke approve.
 
-### 6.2 Approve ATT for SourceBridge
+#### 5.1.2 Approve ATT untuk SourceBridge
 
-You can grant a large allowance once (e.g. 1,000,000 ATT) and reuse it for multiple locks.
+Script ini approve ATT ke `SEPOLIA_SOURCE_BRIDGE` (SourceBridge v2):
 
 ```bash
-node scripts/approve_att_for_bridge.js
+# Contoh: approve 1000 ATT
+node scripts/approve_att_for_bridge.js 1000
 ```
 
-Example:
+Contoh output:
 
 ```text
 Wallet        : 0x36b9...
 Token         : ATT ( 0xDc92... )
 Balance       : 982700.0
 Allowance now : 0.0
-Approving     : 1000000.0 ATT to bridge 0x1B1B...
-Approve tx hash: 0xc33489...
+Approving     : 1000.0 ATT to bridge 0x1B1B61bfc1922b3ACB0cd52a00F6472A84820D99
+Approve tx hash: 0xc33489ee...
 Status        : 1
-Allowance new : 1000000.0
+Allowance new : 1000.0
 ```
 
-Re‑run the state check:
+#### 5.1.3 Lock ATT dari Sepolia ke Amoy
 
-```bash
-node scripts/check_att_state.js
-```
+Script ini:
 
-You should now see:
-
-```text
-Allowance --> Bridge: 1000000.0
-```
-
-### 6.3 Lock ATT on Sepolia (forward bridge)
-
-Use the helper script:
+- Menggunakan `TEST_SENDER_PRIVATE_KEY` di Sepolia
+- Memanggil `SourceBridge.lock(amount)`
+- Mengirim event `Locked(nonce, user, amount)`
 
 ```bash
 node scripts/send_test_from_sepolia.js
 ```
 
-Example:
+Contoh output:
 
 ```text
 Sender address : 0x36b9...
@@ -361,24 +354,21 @@ Recipient (Amoy): 0x36b9...
 Amount           : 1000000000000000000000
 lock() inputs: [ 'amount:uint256' ]
 Memanggil: lock(amount)
-Tx sent: 0xe9cafa95...
+Tx sent: 0xe9cafa957c044879e0b0bd59f4b8505e03ba9f1ab58719c4ee360b1e5bcbf875
 Tx confirmed in block: 9821907
 ```
 
-Notes:
-
-- The script currently uses a hard‑coded amount (`1_000 * 10^18` = `1000 ATT`).  
-- To change it, edit `scripts/send_test_from_sepolia.js` or add an env like `BRIDGE_TEST_AMOUNT`.
-
-### 6.4 Observe relayer processing Locked events
-
-On the VPS, watch relayer logs:
+Kamu bisa menjalankan lagi untuk test kedua:
 
 ```bash
-pm2 logs aegisbridge-relayer-testnet --lines 80
+node scripts/send_test_from_sepolia.js
 ```
 
-Example snippet:
+---
+
+#### 5.1.4 Relayer memproses `Locked` → `mintFromSource` di Amoy
+
+Di log relayer (PM2) akan muncul pola seperti:
 
 ```text
 [Forward[Past]] New Locked event: nonce=18, user=0x36b9..., amount=1000.0 ATT
@@ -387,277 +377,213 @@ Example snippet:
 [Forward[Past]] mintFromSource(nonce=18) tx confirmed in block 30374171, status=1
 ```
 
-If the relayer is behind, it will:
+Artinya relayer sudah sukses mint wATT untuk user di Amoy.
 
-- Catch up from `RELAYER_FROM_BLOCK_SEPOLIA`
-- Process all past `Locked` events and mark processed nonces
-- Then switch to live event streaming
+---
 
-### 6.5 Check wATT balance on Amoy (user wallet)
+#### 5.1.5 Cek wATT di Amoy (wallet + pool)
+
+**Cek saldo wATT wallet user:**
 
 ```bash
 node scripts/check_watt_wallet_amoy.js
 ```
 
-Example:
+Contoh output:
 
 ```text
 RPC Amoy   : https://polygon-amoy-public.nodies.app
-wATT token : 0x9A06...
+wATT token : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
 Wallet     : 0x36b9...
 Balance    : 2030 wATT di 0x36b9...
 ```
 
-### 6.6 Check wATT balance in bridge pool (Amoy)
-
-This checks the **pool** address (TargetBridge itself), not the user:
+**Cek saldo wATT di pool bridge (TargetBridge):**
 
 ```bash
 node scripts/check_watt_amoy.js
 ```
 
-Example:
+Contoh output:
 
 ```text
 RPC Amoy   : https://polygon-amoy-public.nodies.app
-wATT token : 0x9A06...
-Pool addr  : 0x3438B1...
-Token   : wATT ( 0x9A06... )
-Balance : 1670.0 wATT di 0x3438B1...
+wATT token : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4
+Pool addr  : 0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
+Token   : wATT ( 0x9A0687... )
+Balance : 1670.0 wATT di 0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
 ```
 
-- When bridging **forward**, the relayer mints wATT **to the user**, not to the pool.
-- The pool balance is used for **reverse** direction and/or top‑up flows (depending on config).
+Forward flow dinyatakan **sukses** jika:
+
+- Saldo ATT di Sepolia **berkurang** sesuai amount yang di‑lock
+- Saldo wATT di wallet Amoy **bertambah**
+- Saldo wATT di pool Amoy berubah konsisten dengan histori lock/return
 
 ---
 
-## 7. How to test bridge (Reverse: Amoy → Sepolia)
+### 5.2 Reverse Bridge: Amoy → Sepolia
 
-Reverse direction burns (or locks) wATT on Amoy and unlocks ATT on Sepolia.
+Alur: **burn/lock wATT di Amoy** via `TargetBridge.requestReturnToSource` → relayer detect event `ReturnRequested` → **release ATT di Sepolia** ke user.
 
-Again, make sure:
+#### 5.2.1 Approve wATT untuk TargetBridge di Amoy
 
-- Relayer on VPS is **running**
-- Wallet on Amoy holds enough wATT
-
-### 7.1 Check wATT in user wallet (Amoy)
-
-```bash
-node scripts/check_watt_wallet_amoy.js
-```
-
-Example:
-
-```text
-RPC Amoy   : https://polygon-amoy-public.nodies.app
-wATT token : 0x9A06...
-Wallet     : 0x36b9...
-Balance    : 1030 wATT di 0x36b9...
-```
-
-### 7.2 Approve TargetBridge to spend wATT
-
-Approve the amount you want to bridge back, in whole token units:
+Script ini approve wATT ke `TARGET_BRIDGE_AMOY`:
 
 ```bash
 node scripts/approve_watt_for_bridge.js 1000
 ```
 
-Example:
+Contoh output:
 
 ```text
 Wallet        : 0x36b9...
-Token         : wATT (0x9A06...)
+Token         : wATT (0x9A0687...)
 Balance       : 2030.0
 Allowance now : 0.0
-Approving     : 1000 wATT to bridge 0x3438B1...
-Approve tx hash: 0xa4fd92...
+Approving     : 1000 wATT to bridge 0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
+Approve tx hash: 0xa4fd922a4f4a30ec8ce8740654777faebf3c325855c61b52b8caf2808e834280
 Status        : 1
 Allowance new : 1000.0
 ```
 
-### 7.3 Request return to Sepolia
+#### 5.2.2 Request return ke Sepolia
 
-Now call the reverse bridge function on `TargetBridge`:
+Script ini memanggil `TargetBridge.requestReturnToSource(amount)` di Amoy:
 
-```bash
-node scripts/request_return_to_sepolia.js 1000
-```
+   ```bash
+   node scripts/request_return_to_sepolia.js 1000
+   ```
 
-Example:
+Contoh output:
 
 ```text
 RPC Amoy      : https://polygon-amoy-public.nodies.app
 Wallet        : 0x36b9...
-TargetBridge  : 0x3438B1...
-wATT token    : 0x9A06... (wATT/18)
+TargetBridge  : 0x3438B1700C8c08eB3F7eF9bc2D5115bE1B0343A5
+wATT token    : 0x9A068771D7FcdB50b1ce41dfFb184099b5f32Dc4 (wATT/18)
 Current wATT  : 2030.0
 Fungsi kandidat di TargetBridge: [ 'requestReturnToSource' ]
 Dipilih fungsi: requestReturnToSource(amount)
 Memanggil: requestReturnToSource(1000) pada TargetBridge...
-Tx sent: 0x0b2bdce6...
+Tx sent: 0x0b2bdce6f4861d037039132cf0ef2a41036ef5025bc2934f0d26ec201dc8f186
 Tx confirmed in block: 30375411 status: 1
 ```
 
-If you see `execution reverted (unknown custom error)` during `estimateGas`, typical causes:
+Setelah ini, event `ReturnRequested` sudah emit di Amoy.
 
-- **Allowance too low** – run `approve_watt_for_bridge.js` again with a higher value.
-- **Balance too low** – check `check_watt_wallet_amoy.js`.
-- **Bridge paused / invalid state** – check contract state or relayer logs.
+---
 
-### 7.4 Observe relayer processing ReturnRequested events
+#### 5.2.3 Relayer memproses `ReturnRequested` → `releaseFromTarget` di Sepolia
 
-On VPS:
-
-```bash
-pm2 logs aegisbridge-relayer-testnet --lines 80
-```
-
-You should see something like:
+Di log relayer akan muncul pola seperti:
 
 ```text
-[Reverse] Catching up ReturnRequested events on Amoy from block ...
-[Reverse[Past]] New ReturnRequested: nonce=..., user=0x36b9..., amount=1000.0 wATT
-[Reverse[Past]] Calling releaseFromTarget on Sepolia: to=0x36b9..., amount=1000.0 ATT, nonce=...
+[Reverse[Past]] New ReturnRequested: nonce=..., user=0x36b9..., amount=1000.0
+[Reverse[Past]] Calling releaseFromTarget on Sepolia ...
 [Reverse[Past]] releaseFromTarget(...) tx sent: 0x...
 [Reverse[Past]] releaseFromTarget(...) tx confirmed in block ..., status=1
 ```
 
-### 7.5 Verify balances after reverse bridge
+Ini artinya relayer sudah melepas ATT di Sepolia ke user.
 
-#### On Amoy (wATT)
+---
+
+#### 5.2.4 Verifikasi hasil: wATT turun, ATT naik
+
+**Cek saldo wATT wallet di Amoy:**
 
 ```bash
 node scripts/check_watt_wallet_amoy.js
 ```
 
-Expect the user’s wATT balance to **decrease** (e.g. from `2030` → `1030`).
+Contoh setelah reverse:
 
-#### On Sepolia (ATT)
+```text
+RPC Amoy   : https://polygon-amoy-public.nodies.app
+wATT token : 0x9A0687...
+Wallet     : 0x36b9...
+Balance    : 1030 wATT di 0x36b9...
+```
+
+**Cek saldo ATT di Sepolia:**
 
 ```bash
 node scripts/check_att_state.js
 ```
 
-You should see ATT balance increased (and allowance decreased slightly if bridge consumes allowance):
+Contoh:
 
 ```text
 Wallet        : 0x36b9...
-ATT address   : 0xDc92...
-Balance       : 977670.0   # example balance after multiple cycles
+ATT address   : 0xDc925c125DC7b51946031761c1693eA6238Bf3fb
+Symbol/dec    : ATT / 18
+Balance       : 977670.0
 Allowance --> Bridge: 994970.0
 ```
 
+Jika:
+
+- wATT di Amoy **berkurang** sesuai amount yang di‑return
+- ATT di Sepolia **bertambah / kembali** konsisten dengan histori lock/return
+
+maka **reverse flow Amoy → Sepolia sudah berjalan dengan benar.**
+
 ---
 
-## 8. Troubleshooting
+## 6. Relayer’s Role (Ringkasan)
 
-### 8.1 `Your app has exceeded its compute units per second capacity` (Alchemy 429)
+**Forward (Sepolia → Amoy):**
 
-If you see:
+1. Listen event `Locked(nonce, user, amount)` di `SourceBridge` (Sepolia).
+2. Cek ke `TargetBridge` apakah nonce sudah pernah diproses.
+3. Jika belum, panggil `mintFromSource(user, amount, nonce)` di Amoy.
+4. Tandai nonce sebagai processed di `TargetBridge` (anti double‑mint).
 
-```text
-code: 429,
-message: "Your app has exceeded its compute units per second capacity..."
-```
+**Reverse (Amoy → Sepolia):**
 
-Then:
+1. Listen event `ReturnRequested(nonce, user, amount)` di `TargetBridge` (Amoy).
+2. Cek status nonce di `SourceBridge` (Sepolia).
+3. Panggil `releaseFromTarget(user, amount, nonce)` untuk melepas ATT.
+4. Tandai nonce sebagai processed di `SourceBridge` (idempotent).
 
-- RPC key is rate‑limited (especially when relayer is catching up logs).
-- Fixes:
-  - Switch to another RPC (`*_RPC_URL_1`, `_2`, `_3`)
-  - Upgrade plan on the RPC provider
-  - Reduce `RELAYER_POLL_INTERVAL_MS` or scan range if needed
+Selama relayer **online** dan kedua RPC sehat, semua test di section 5 dapat dijalankan berulang untuk demo / R&D.
 
-### 8.2 `JsonRpcProvider failed to detect network and cannot start up`
+---
 
-Usually caused by:
+## 7. Troubleshooting (Singkat)
 
-- Invalid RPC URL
-- RPC provider down / blocked
+Beberapa error umum yang mungkin muncul:
 
-Check:
+### 7.1 `execution reverted (unknown custom error)` saat lock
 
-- `SEPOLIA_RPC_URL` / `AMOY_RPC_URL` in `.env`
-- Test with simple scripts:
-
-```bash
-node scripts/test_rpc_sepolia.js
-node scripts/test_rpc_amoy.js
-```
-
-(if present in this repo)
-
-### 8.3 `execution reverted (unknown custom error)` on lock / requestReturn
-
-For `send_test_from_sepolia.js` (lock):
-
-- Check:
-  - ATT balance is sufficient (`check_att_state.js`)
-  - Allowance to the bridge is high enough (`Allowance --> Bridge`)
-- If allowance is `0` or lower than the amount, run:
-
+- Cek apakah:
+  - Saldo ATT cukup di Sepolia.
+  - Allowance ke `SEPOLIA_SOURCE_BRIDGE` cukup besar.
+- Gunakan:
   ```bash
-  node scripts/approve_att_for_bridge.js
+  node scripts/check_att_state.js
   ```
 
-For `request_return_to_sepolia.js`:
+### 7.2 Error 429 dari Alchemy (`Your app has exceeded its compute units per second capacity`)
 
-- Check:
-  - wATT balance on Amoy (`check_watt_wallet_amoy.js`)
-  - Allowance to TargetBridge (`approve_watt_for_bridge.js`)
+- Artinya rate limit tercapai.
+- Solusi:
+  - Tambah backup RPC (`SEPOLIA_RPC_URL_1/2/3`, `AMOY_RPC_URL_1/2/3`).
+  - Kurangi interval polling (`RELAYER_POLL_INTERVAL_MS`) jika terlalu agresif.
+  - Atau upgrade plan di provider RPC.
 
----
+### 7.3 Relayer tidak menemukan network (`JsonRpcProvider failed to detect network and cannot start up`)
 
-## 9. Git workflow (local + VPS)
-
-Simple mental model:
-
-- **VS Code (Windows / `D:\aegisbridge`)** – main dev workspace
-- **VPS (`~/aegisbridge-poc`)** – runtime for relayer
-
-Typical flow:
-
-```bash
-# On VS Code
-git status
-git add .
-git commit -m "feat: update README and bridge test scripts"
-git push origin main
-```
-
-Then on VPS:
-
-```bash
-cd ~/aegisbridge-poc
-git pull --rebase origin main
-
-# Reinstall deps if package.json changed
-npm install
-
-# Restart relayer
-pm2 restart aegisbridge-relayer-testnet
-pm2 logs aegisbridge-relayer-testnet --lines 50
-```
-
-If `git pull --rebase` complains about unstaged changes:
-
-```bash
-git status        # inspect
-git stash push -m "local tmp changes"   # or commit them properly
-git pull --rebase origin main
-# optionally: git stash pop
-```
+- Cek apakah `SEPOLIA_RPC_URL` dan `AMOY_RPC_URL` valid.
+- Test dengan script kecil:
+  ```bash
+  node scripts/test_rpc_amoy.js
+  ```
 
 ---
 
-## 10. Safety & Limitations
+## 8. Disclaimer
 
-- This is a **testnet PoC only** – not audited, not production‑ready.
-- No slashing or sophisticated security; relayer is a single trusted signer.
-- No pricing / oracle integration; values are 1:1 ATT ↔ wATT.
-
-For any future refactor:
-
-- Keep `How to test bridge` section and update command examples if script names change.
-- Make sure `.env` comments stay in sync with actual deployed addresses.
+AegisBridge PoC v2 ini dibuat untuk **tujuan riset & edukasi saja** di testnet.  
+Jangan gunakan desain ini **sebagai‑is** untuk mainnet tanpa audit keamanan yang serius dan review arsitektur yang lebih dalam (signing, relayer set, fee model, dsb.).

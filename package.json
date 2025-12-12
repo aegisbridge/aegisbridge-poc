@@ -4,7 +4,29 @@
   "description": "This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+
+    "compile": "npx hardhat compile",
+
+    "relayer:dev": "node scripts/testnet_relayer.js",
+    "relayer:start": "pm2 start scripts/testnet_relayer.js --name aegisbridge-relayer-testnet --time",
+    "relayer:stop": "pm2 stop aegisbridge-relayer-testnet || true",
+    "relayer:logs": "pm2 logs aegisbridge-relayer-testnet --lines 80",
+
+    "bridge:forward:check-att": "node scripts/check_att_state.js",
+    "bridge:forward:approve": "node scripts/approve_att_for_bridge.js 1000",
+    "bridge:forward:send": "node scripts/send_test_from_sepolia.js",
+    "bridge:test:forward": "npm run bridge:forward:check-att && npm run bridge:forward:approve && npm run bridge:forward:send",
+
+    "bridge:reverse:check-watt-wallet": "node scripts/check_watt_wallet_amoy.js",
+    "bridge:reverse:approve": "node scripts/approve_watt_for_bridge.js 1000",
+    "bridge:reverse:request": "node scripts/request_return_to_sepolia.js 1000",
+    "bridge:reverse:check-pool": "node scripts/check_watt_amoy.js",
+    "bridge:test:reverse": "npm run bridge:reverse:check-watt-wallet && npm run bridge:reverse:approve && npm run bridge:reverse:request && npm run bridge:reverse:check-pool",
+
+    "deploy:sepolia:bridge": "npx hardhat run scripts/deploy_source_bridge_v2.js --network sepolia",
+    "deploy:amoy:bridge": "npx hardhat run scripts/deploy_target_bridge_v2.js --network amoy",
+    "deploy:bridges:testnet": "npm run deploy:sepolia:bridge && npm run deploy:amoy:bridge"
   },
   "keywords": [],
   "author": "",
