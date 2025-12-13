@@ -1,43 +1,32 @@
 /**
- * AegisBridge - Stateful Testnet Relayer (Sepolia <-> Amoy)
+ * AegisBridge - Stateful Testnet Relayer (Sepolia <-> Amoy) [Robust RPC]
  *
- * What this adds (Step A):
- * - Persistent state file: data/relayer_state.json
- * - Auto-resume from last scanned blocks (no re-scan from the beginning after restart)
- * - Clean logs: nonce, amount, srcTx, dstTx, blocks
+ * Fixes vs previous version:
+ * - Probes each RPC URL to detect chainId and FILTERS out mismatched networks before building FallbackProvider.
+ * - Does NOT force a static network on JsonRpcProvider (prevents "network changed: 1 => 11155111").
  *
  * Run:
  *   node scripts/testnet_relayer_stateful.js
  *
- * Key env vars (compatible with your existing .env naming):
- *   SEPOLIA_RPC_URL, SEPOLIA_RPC_URL_1, SEPOLIA_RPC_URL_2, SEPOLIA_RPC_URL_3
- *   AMOY_RPC_URL,   AMOY_RPC_URL_1,   AMOY_RPC_URL_2,   AMOY_RPC_URL_3
- *
- *   SEPOLIA_SOURCE_BRIDGE_ADDRESS (or SOURCE_BRIDGE_SEPOLIA / SEPOLIA_SOURCE_BRIDGE / SEPOLIA_SOURCE_BRIDGE_V2)
- *   AMOY_TARGET_BRIDGE_ADDRESS    (or TARGET_BRIDGE_AMOY / AMOY_TARGET_BRIDGE_V2)
- *
- *   PRIVATE_KEY / DEPLOYER_PRIVATE_KEY
- *
  * State:
- *   RELAYER_STATE_FILE=./data/relayer_state.json   (default)
- *   RELAYER_RESET_STATE=true                       (ignore existing state)
+ *   RELAYER_STATE_FILE=./data/relayer_state.json
+ *   RELAYER_RESET_STATE=true
  *
  * Scanning:
- *   RELAYER_FROM_BLOCK_SEPOLIA=...   (used if no state yet OR reset state)
- *   RELAYER_POLL_INTERVAL_MS=5000
+ *   RELAYER_FROM_BLOCK_SEPOLIA=...
  *   SEPOLIA_LOG_MAX_RANGE=10
+ *   RELAYER_POLL_INTERVAL_MS=5000
  *   RELAYER_CONFIRMATIONS_SEPOLIA=2
- *   RELAYER_CONFIRMATIONS_AMOY=2
  *
- * Mint execution:
+ * Mint:
  *   RELAYER_MINT_GAS_LIMIT=300000
- *   RELAYER_MINT_FUNCTION=...        (optional override)
- *   SOURCE_CHAIN_ID=11155111         (optional; default sepolia)
- *   TARGET_CHAIN_ID=80002            (optional; default amoy)
+ *   RELAYER_MINT_FUNCTION=... (optional)
  *
- * Notes:
- * - This script avoids the Hardhat CLI limitations and runs directly with Node + ethers v6.
- * - It auto-detects a mint function on TargetBridge unless RELAYER_MINT_FUNCTION is set.
+ * RPC:
+ *   SEPOLIA_RPC_URL/_1/_2/_3
+ *   AMOY_RPC_URL/_1/_2/_3
+ *   RPC_QUORUM_SEPOLIA=1
+ *   RPC_QUORUM_AMOY=1
  */
 
 require("dotenv").config();
@@ -62,7 +51,6 @@ function envBool(name, def = false) {
   if (!v) return def;
   return ["1", "true", "yes", "y", "on"].includes(v);
 }
-
 function pickEnv(...names) {
   for (const n of names) {
     const v = env(n, "");
@@ -70,49 +58,31 @@ function pickEnv(...names) {
   }
   return "";
 }
-
 function normalizePk(pk) {
   if (!pk) return "";
   const s = pk.trim();
-  if (s.startsWith("0x")) return s;
-  return "0x" + s;
+  return s.startsWith("0x") ? s : "0x" + s;
 }
-
 function isPlaceholderUrl(u) {
   if (!u) return true;
   const s = u.toLowerCase();
   return s.includes("your_alchemy_key") || s.includes("your_") || s.endsWith("/v2/") || s.includes("example");
 }
-
 function collectRpc(prefix) {
-  const keys = [
-    `${prefix}_RPC_URL`,
-    `${prefix}_RPC_URL_1`,
-    `${prefix}_RPC_URL_2`,
-    `${prefix}_RPC_URL_3`,
-  ];
+  const keys = [`${prefix}_RPC_URL`, `${prefix}_RPC_URL_1`, `${prefix}_RPC_URL_2`, `${prefix}_RPC_URL_3`];
   const urls = [];
   for (const k of keys) {
     const u = env(k, "");
     if (u && !isPlaceholderUrl(u)) urls.push(u);
   }
-  // de-dup
   return [...new Set(urls)];
 }
 
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
-}
-
+function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
 function loadJson(p, fallback) {
-  try {
-    if (!fs.existsSync(p)) return fallback;
-    return JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch {
-    return fallback;
-  }
+  try { return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf-8")) : fallback; }
+  catch { return fallback; }
 }
-
 function saveJsonAtomic(p, data) {
   ensureDir(path.dirname(p));
   const tmp = p + ".tmp";
@@ -120,43 +90,59 @@ function saveJsonAtomic(p, data) {
   fs.renameSync(tmp, p);
 }
 
-function formatUnitsSafe(value, decimals = 18) {
-  try { return ethers.formatUnits(value, decimals); }
-  catch { return String(value); }
+function loadAbi(artifactPath) {
+  // artifactPath is relative to this script file in scripts/
+  return require(artifactPath).abi;
 }
 
-function buildFallbackProvider(urls, chainId, name, quorumDefault = 1) {
-  const configs = urls.map((u, idx) => {
-    const provider = new ethers.JsonRpcProvider(u, { chainId, name });
-    return {
-      provider,
-      priority: idx + 1,
-      weight: 1,
-      stallTimeout: 2000,
-    };
+function formatUnitsSafe(value, decimals = 18) {
+  try { return ethers.formatUnits(value, decimals); } catch { return String(value); }
+}
+
+async function probeAndFilterUrls(urls, label) {
+  // Detect chainId for each URL, keep only those matching the first successful chainId.
+  let expected = null;
+  const good = [];
+  const bad = [];
+  for (const u of urls) {
+    try {
+      const p = new ethers.JsonRpcProvider(u);
+      const n = await p.getNetwork();
+      const cid = BigInt(n.chainId);
+      if (expected === null) expected = cid;
+
+      if (cid === expected) {
+        good.push({ url: u, chainId: cid });
+      } else {
+        bad.push({ url: u, chainId: cid, reason: `mismatch (expected ${expected})` });
+      }
+    } catch (e) {
+      bad.push({ url: u, chainId: null, reason: e?.shortMessage || e?.message || String(e) });
+    }
+  }
+
+  if (!good.length) {
+    const lines = bad.map(x => `- ${x.url} (${x.reason})`).join("\n");
+    throw new Error(`[${label}] No working RPC endpoints.\n${lines}`);
+  }
+
+  return { chainId: expected, good, bad };
+}
+
+function buildFallbackProvider(goodUrls, quorum, label) {
+  const configs = goodUrls.map((item, idx) => {
+    const provider = new ethers.JsonRpcProvider(item.url);
+    return { provider, priority: idx + 1, weight: 1, stallTimeout: 2000 };
   });
-  const quorum = envInt(`RPC_QUORUM_${name.toUpperCase()}`, quorumDefault);
   return new ethers.FallbackProvider(configs, quorum);
 }
 
-function loadAbi(artifactPath, fallbackName) {
-  try {
-    return require(artifactPath).abi;
-  } catch {
-    // If artifactPath doesn't exist, we can't load by name here (no Hardhat runtime).
-    throw new Error(`ABI not found: ${artifactPath} (expected ${fallbackName})`);
-  }
-}
-
 function pickMintFunction(targetIface, forcedName = "") {
-  // Allow forced function name from env
   if (forcedName) {
     const frag = targetIface.fragments.find(f => f.type === "function" && f.name === forcedName);
     if (!frag) throw new Error(`RELAYER_MINT_FUNCTION="${forcedName}" not found in TargetBridge ABI`);
     return frag;
   }
-
-  // Auto-detect: name contains mint and has [address, uint256, uint256] (any order)
   const candidates = targetIface.fragments
     .filter(f => f.type === "function" && f.stateMutability !== "view" && f.stateMutability !== "pure")
     .filter(f => /mint|release|finalize|claim|bridge/i.test(f.name))
@@ -175,14 +161,11 @@ function pickMintFunction(targetIface, forcedName = "") {
   };
 
   candidates.sort((a,b) => score(b) - score(a));
-  if (!candidates.length) {
-    throw new Error("Could not auto-detect a mint function on TargetBridge. Set RELAYER_MINT_FUNCTION in .env.");
-  }
+  if (!candidates.length) throw new Error("Could not auto-detect mint function; set RELAYER_MINT_FUNCTION.");
   return candidates[0];
 }
 
 function buildArgsByHeuristic(frag, ctx) {
-  // ctx: { to, amount, nonce, sourceChainId, targetChainId }
   const args = [];
   let usedAmount = false;
   let usedNonce = false;
@@ -191,42 +174,22 @@ function buildArgsByHeuristic(frag, ctx) {
     const t = inp.type;
     const n = (inp.name || "").toLowerCase();
 
-    if (t === "address") {
-      // recipient/to/user
-      args.push(ctx.to);
-      continue;
-    }
-
+    if (t === "address") { args.push(ctx.to); continue; }
     if (/^uint/.test(t)) {
-      // choose amount then nonce then chainId-ish
-      if (!usedAmount) {
-        args.push(ctx.amount);
-        usedAmount = true;
-        continue;
-      }
-      if (!usedNonce) {
-        args.push(ctx.nonce);
-        usedNonce = true;
-        continue;
-      }
+      if (!usedAmount) { args.push(ctx.amount); usedAmount = true; continue; }
+      if (!usedNonce) { args.push(ctx.nonce); usedNonce = true; continue; }
 
-      if (n.includes("src") || n.includes("source") || n.includes("from") || n.includes("chain")) {
-        args.push(ctx.sourceChainId);
-      } else if (n.includes("dst") || n.includes("target") || n.includes("to") || n.includes("chain")) {
-        args.push(ctx.targetChainId);
-      } else {
-        // fallback
-        args.push(0n);
-      }
+      if (n.includes("src") || n.includes("source") || n.includes("from")) args.push(ctx.sourceChainId);
+      else if (n.includes("dst") || n.includes("target") || n.includes("to")) args.push(ctx.targetChainId);
+      else if (n.includes("chain")) args.push(ctx.targetChainId);
+      else args.push(0n);
       continue;
     }
-
-    if (t === "bytes32") args.push(ethers.ZeroHash);
-    else if (t === "bytes") args.push("0x");
-    else if (t === "bool") args.push(true);
-    else throw new Error(`Unsupported mint param type: ${t}`);
+    if (t === "bytes32") { args.push(ethers.ZeroHash); continue; }
+    if (t === "bytes") { args.push("0x"); continue; }
+    if (t === "bool") { args.push(true); continue; }
+    throw new Error(`Unsupported mint param type: ${t}`);
   }
-
   return args;
 }
 
@@ -237,13 +200,12 @@ async function main() {
   const sepoliaUrls = collectRpc("SEPOLIA");
   const amoyUrls = collectRpc("AMOY");
 
-  if (!sepoliaUrls.length) throw new Error("No usable Sepolia RPC URLs found. Set SEPOLIA_RPC_URL/_1/_2/_3.");
-  if (!amoyUrls.length) throw new Error("No usable Amoy RPC URLs found. Set AMOY_RPC_URL/_1/_2/_3.");
+  if (!sepoliaUrls.length) throw new Error("No Sepolia RPC URLs found. Set SEPOLIA_RPC_URL/_1/_2/_3.");
+  if (!amoyUrls.length) throw new Error("No Amoy RPC URLs found. Set AMOY_RPC_URL/_1/_2/_3.");
 
   const pk = pickEnv("DEPLOYER_PRIVATE_KEY", "PRIVATE_KEY");
   if (!pk) throw new Error("Missing PRIVATE_KEY (or DEPLOYER_PRIVATE_KEY) in .env");
 
-  // Addresses
   const sourceBridgeAddress = pickEnv(
     "SEPOLIA_SOURCE_BRIDGE_ADDRESS",
     "SEPOLIA_SOURCE_BRIDGE_V2",
@@ -260,48 +222,52 @@ async function main() {
   if (!sourceBridgeAddress) throw new Error("Missing SourceBridge address env (SEPOLIA_SOURCE_BRIDGE_ADDRESS / ...)");
   if (!targetBridgeAddress) throw new Error("Missing TargetBridge address env (AMOY_TARGET_BRIDGE_ADDRESS / ...)");
 
-  const sepoliaChainId = BigInt(env("SOURCE_CHAIN_ID", "11155111"));
-  const amoyChainId = BigInt(env("TARGET_CHAIN_ID", "80002"));
+  // Probe and filter endpoints by detected chainId (prevents network mismatch crash)
+  console.log(`[dotenv] loaded at ${nowIso()}\n`);
 
-  // Providers (fallback)
-  const sepoliaProvider = buildFallbackProvider(sepoliaUrls, Number(sepoliaChainId), "sepolia", 1);
-  const amoyProvider = buildFallbackProvider(amoyUrls, Number(amoyChainId), "amoy", 1);
+  const probSep = await probeAndFilterUrls(sepoliaUrls, "sepolia");
+  const probAmoy = await probeAndFilterUrls(amoyUrls, "amoy");
+
+  const quorumSep = envInt("RPC_QUORUM_SEPOLIA", 1);
+  const quorumAmoy = envInt("RPC_QUORUM_AMOY", 1);
+
+  const sepoliaProvider = buildFallbackProvider(probSep.good, quorumSep, "sepolia");
+  const amoyProvider = buildFallbackProvider(probAmoy.good, quorumAmoy, "amoy");
 
   const walletSepolia = new ethers.Wallet(normalizePk(pk), sepoliaProvider);
   const walletAmoy = new ethers.Wallet(normalizePk(pk), amoyProvider);
 
-  // Load ABIs
-  const sourceAbi = loadAbi("../artifacts/contracts/SourceBridge.sol/SourceBridge.json", "SourceBridge");
-  const targetAbi = loadAbi("../artifacts/contracts/TargetBridge.sol/TargetBridge.json", "TargetBridge");
+  const sourceAbi = loadAbi("../artifacts/contracts/SourceBridge.sol/SourceBridge.json");
+  const targetAbi = loadAbi("../artifacts/contracts/TargetBridge.sol/TargetBridge.json");
 
   const sourceBridge = new ethers.Contract(sourceBridgeAddress, sourceAbi, walletSepolia);
   const targetBridge = new ethers.Contract(targetBridgeAddress, targetAbi, walletAmoy);
 
-  // Print header
-  console.log(`[dotenv] loaded at ${nowIso()}\n`);
-
   console.log("[RPC][sepolia] used:");
-  sepoliaUrls.forEach((u, i) => console.log(`  - (${i === 0 ? "primary" : "backup #" + i}) ${u}`));
+  probSep.good.forEach((x, i) => console.log(`  - (${i === 0 ? "primary" : "backup #" + i}) ${x.url} (chainId ${x.chainId})`));
+  if (probSep.bad.length) {
+    console.log("[RPC][sepolia] skipped:");
+    probSep.bad.forEach(x => console.log(`  - ${x.url} (${x.reason})`));
+  }
+
   console.log("\n[RPC][amoy] used:");
-  amoyUrls.forEach((u, i) => console.log(`  - (${i === 0 ? "primary" : "backup #" + i}) ${u}`));
+  probAmoy.good.forEach((x, i) => console.log(`  - (${i === 0 ? "primary" : "backup #" + i}) ${x.url} (chainId ${x.chainId})`));
+  if (probAmoy.bad.length) {
+    console.log("[RPC][amoy] skipped:");
+    probAmoy.bad.forEach(x => console.log(`  - ${x.url} (${x.reason})`));
+  }
 
   console.log("==============================================");
   console.log("=== AegisBridge v2 Testnet Relayer (State) ===");
   console.log("==============================================");
   console.log("Env            :", ENV);
-  console.log("Sepolia RPC    :", sepoliaUrls[0]);
-  console.log("Amoy RPC       :", amoyUrls[0]);
+  console.log("Sepolia chainId:", probSep.chainId.toString());
+  console.log("Amoy chainId   :", probAmoy.chainId.toString());
   console.log("SourceBridge   :", sourceBridgeAddress);
   console.log("TargetBridge   :", targetBridgeAddress);
   console.log("Relayer wallet :", await walletSepolia.getAddress());
   console.log("Dry run        :", DRY_RUN);
   console.log("");
-
-  // Detect network quickly (will throw if quorum can't be met)
-  const netSep = await sepoliaProvider.getNetwork();
-  const netAmoy = await amoyProvider.getNetwork();
-  console.log(`[net] sepolia chainId=${netSep.chainId} name=${netSep.name}`);
-  console.log(`[net] amoy   chainId=${netAmoy.chainId} name=${netAmoy.name}\n`);
 
   // Persistent state
   const stateFile = env("RELAYER_STATE_FILE", path.join(".", "data", "relayer_state.json"));
@@ -314,26 +280,17 @@ async function main() {
       nextBlock: envInt("RELAYER_FROM_BLOCK_SEPOLIA", 0) || 0,
       lastSeenBlock: 0,
       lastProcessed: { nonce: null, blockNumber: null, srcTx: null, dstTx: null }
-    },
-    amoy: {
-      nextBlock: envInt("RELAYER_FROM_BLOCK_AMOY", 0) || 0,
-      lastSeenBlock: 0
     }
   };
 
   const state = resetState ? defaultState : loadJson(stateFile, defaultState);
 
-  // If no state yet, but env is set, honor env as starting point
   if (!state.sepolia.nextBlock && envInt("RELAYER_FROM_BLOCK_SEPOLIA", 0)) {
     state.sepolia.nextBlock = envInt("RELAYER_FROM_BLOCK_SEPOLIA", 0);
   }
-  if (!state.amoy.nextBlock && envInt("RELAYER_FROM_BLOCK_AMOY", 0)) {
-    state.amoy.nextBlock = envInt("RELAYER_FROM_BLOCK_AMOY", 0);
-  }
 
   console.log(`[state] file=${stateFile}`);
-  console.log(`[state] sepolia.nextBlock=${state.sepolia.nextBlock || "(auto)"}`);
-  console.log("");
+  console.log(`[state] sepolia.nextBlock=${state.sepolia.nextBlock || "(auto)"}\n`);
 
   // Config
   const pollMs = envInt("RELAYER_POLL_INTERVAL_MS", 5000);
@@ -346,10 +303,9 @@ async function main() {
   // Event topic
   const lockedTopic = ethers.id("Locked(address,uint256,uint256)");
 
-  // Mint fn selection
-  const targetIface = targetBridge.interface;
-  const mintFrag = pickMintFunction(targetIface, forcedMintFn);
+  const mintFrag = pickMintFunction(targetBridge.interface, forcedMintFn);
   console.log(`[mint] function selected: ${mintFrag.name}(${mintFrag.inputs.map(i=>i.type).join(",")})\n`);
+  console.log(`[loop] poll=${pollMs}ms | sepoliaRangeMax=${maxRangeSepolia} | confirmations=${confSepolia}\n`);
 
   async function getLatestSafeBlock(provider, confirmations) {
     const latest = await provider.getBlockNumber();
@@ -359,29 +315,21 @@ async function main() {
   async function scanAndProcessSepolia() {
     const safeLatest = await getLatestSafeBlock(sepoliaProvider, confSepolia);
 
-    // If nextBlock is 0, bootstrap from safeLatest (or configured env)
     if (!state.sepolia.nextBlock || state.sepolia.nextBlock <= 0) {
       state.sepolia.nextBlock = safeLatest;
     }
 
     let fromBlock = state.sepolia.nextBlock;
-    if (fromBlock > safeLatest) return false; // nothing to do
+    if (fromBlock > safeLatest) return false;
 
     const toBlock = Math.min(safeLatest, fromBlock + maxRangeSepolia - 1);
 
-    const filter = {
-      address: sourceBridgeAddress,
-      fromBlock,
-      toBlock,
-      topics: [lockedTopic]
-    };
+    const filter = { address: sourceBridgeAddress, fromBlock, toBlock, topics: [lockedTopic] };
 
     let logs = [];
-    try {
-      logs = await sepoliaProvider.getLogs(filter);
-    } catch (e) {
+    try { logs = await sepoliaProvider.getLogs(filter); }
+    catch (e) {
       console.log(`[${nowIso()}] [warn] getLogs failed ${fromBlock}-${toBlock}: ${e?.shortMessage || e?.message || e}`);
-      // Do not advance state on failure
       return false;
     }
 
@@ -393,24 +341,18 @@ async function main() {
 
     for (const log of logs) {
       let parsed;
-      try {
-        parsed = sourceBridge.interface.parseLog({ topics: log.topics, data: log.data });
-      } catch {
-        continue;
-      }
+      try { parsed = sourceBridge.interface.parseLog({ topics: log.topics, data: log.data }); }
+      catch { continue; }
 
       const user = parsed.args[0];
       const amount = parsed.args[1];
       const nonce = parsed.args[2];
 
-      // Check processed on TargetBridge
       let already = false;
-      try {
-        already = await targetBridge.processedNonces(nonce);
-      } catch (e) {
+      try { already = await targetBridge.processedNonces(nonce); }
+      catch (e) {
         console.log(`[${nowIso()}] [warn] processedNonces(${nonce}) check failed: ${e?.shortMessage || e?.message || e}`);
       }
-
       if (already) {
         console.log(`[${nowIso()}] [skip] nonce=${nonce.toString()} already processed (target)`);
         continue;
@@ -420,19 +362,16 @@ async function main() {
         to: user,
         amount,
         nonce,
-        sourceChainId: sepoliaChainId,
-        targetChainId: amoyChainId
+        sourceChainId: BigInt(probSep.chainId),
+        targetChainId: BigInt(probAmoy.chainId),
       };
-
       const args = buildArgsByHeuristic(mintFrag, ctx);
 
-      // Dry run
       if (DRY_RUN) {
         console.log(`[${nowIso()}] [dry] would mint nonce=${nonce.toString()} amount=${formatUnitsSafe(amount, 18)} to=${user}`);
         continue;
       }
 
-      // Static call first (best-effort)
       try {
         const fn = targetBridge.getFunction(mintFrag.name);
         await fn.staticCall(...args);
@@ -445,6 +384,7 @@ async function main() {
       try {
         const fn = targetBridge.getFunction(mintFrag.name);
         const tx = await fn(...args, { gasLimit: mintGasLimit });
+        console.log(`  srcTx=${log.transactionHash}`);
         console.log(`  dstTx=${tx.hash}`);
         const rc = await tx.wait();
         console.log(`  confirmed block=${rc.blockNumber}`);
@@ -461,7 +401,6 @@ async function main() {
       }
     }
 
-    // Advance nextBlock and persist state
     state.sepolia.nextBlock = toBlock + 1;
     state.updatedAt = nowIso();
     saveJsonAtomic(stateFile, state);
@@ -469,20 +408,15 @@ async function main() {
     return logs.length > 0;
   }
 
-  console.log(`[loop] poll every ${pollMs}ms | sepolia range max ${maxRangeSepolia} blocks | confirmations=${confSepolia}\n`);
-
-  // Main loop
   while (true) {
-    try {
-      await scanAndProcessSepolia();
-    } catch (e) {
-      console.log(`[${nowIso()}] [Fatal] ${e?.stack || e?.message || e}`);
-    }
+    try { await scanAndProcessSepolia(); }
+    catch (e) { console.log(`[${nowIso()}] [Fatal] ${e?.stack || e?.message || e}`); }
+
     await new Promise(r => setTimeout(r, pollMs));
   }
 }
 
 main().catch((e) => {
-  console.error(`[${new Date().toISOString()}] [Fatal]`, e?.stack || e?.message || e);
+  console.error(`[${nowIso()}] [Fatal]`, e?.stack || e?.message || e);
   process.exitCode = 1;
 });
