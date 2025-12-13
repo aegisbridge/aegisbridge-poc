@@ -30,3 +30,5 @@ Thumbs.db
 
 data/*.tmp
 data/relayer_state*.json
+# local snippets
+hardhat_config_snippet.js
